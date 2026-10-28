@@ -12,6 +12,7 @@ Abra a [planilha template](https://docs.google.com/spreadsheets/d/1jh-Np4IvCMkOm
 **Arquivo → Fazer uma cópia**.
 
 Anote o **ID da planilha** — é a sequência de letras e números que aparece na URL entre `/d/` e `/edit`:
+
 ```
 https://docs.google.com/spreadsheets/d/ESTE_E_O_ID/edit
 ```
@@ -33,14 +34,14 @@ https://docs.google.com/spreadsheets/d/ESTE_E_O_ID/edit
 
 No editor do Apps Script vá em **Projeto → Propriedades do projeto → Propriedades de script** e adicione as chaves abaixo.
 
-| Chave | Obrigatória | Descrição |
-|---|---|---|
-| `SPREADSHEET_ID` | Sim | ID da planilha copiada no passo 1 |
-| `SESSION_SECRET` | Gerada automaticamente | Deixe em branco; o sistema gera na primeira execução de `setupAdminPassword` |
-| `SESSION_DURATION_HOURS` | Gerada automaticamente | Deixe em branco; o sistema define como `6` na primeira execução de `setupAdminPassword` |
-| `GUILD_NAME` | Não | Nome da sua Guild exibido na interface (ex.: `Arkham`) |
-| `GUILD_LOGO_URL` | Não | URL da imagem da Guild — pode ser a URL da página do Imgur (ex.: `https://imgur.com/AbCd123`) ou qualquer URL pública. Recomendado: 400 × 150 px |
-| `GUILD_API_URL` | Não | URL da API do jogo, se a sua Guild tiver acesso |
+| Chave                    | Obrigatória            | Descrição                                                                                                                                        |
+| ------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SPREADSHEET_ID`         | Sim                    | ID da planilha copiada no passo 1                                                                                                                |
+| `SESSION_SECRET`         | Gerada automaticamente | Deixe em branco; o sistema gera na primeira execução de `setupAdminPassword`                                                                     |
+| `SESSION_DURATION_HOURS` | Gerada automaticamente | Deixe em branco; o sistema define como `6` na primeira execução de `setupAdminPassword`                                                          |
+| `GUILD_NAME`             | Não                    | Nome da sua Guild exibido na interface (ex.: `Arkham`)                                                                                           |
+| `GUILD_LOGO_URL`         | Não                    | URL da imagem da Guild — pode ser a URL da página do Imgur (ex.: `https://imgur.com/AbCd123`) ou qualquer URL pública. Recomendado: 400 × 150 px |
+| `GUILD_API_URL`          | Não                    | URL da API do jogo, se a sua Guild tiver acesso                                                                                                  |
 
 > **Dica — imagem da Guild no Imgur:** hospede no [Imgur](https://imgur.com) e cole a URL da página da imagem diretamente (ex.: `https://imgur.com/dOgObo9`). O sistema converte automaticamente para o link de imagem — **não é necessário buscar o link direto**. URLs de álbum (`https://imgur.com/a/ID`) não são suportadas. Quando não configurada, o nome da Guild aparece no lugar sem espaço em branco.
 
@@ -120,22 +121,27 @@ O [clasp](https://github.com/google/clasp) permite enviar os arquivos do projeto
 ### Passo a passo
 
 1. **Instale o clasp globalmente:**
+
    ```bash
    npm install -g @google/clasp
    ```
 
 2. **Faça login com sua conta Google:**
+
    ```bash
    clasp login
    ```
 
 3. **Crie o projeto no Apps Script** (ou use um existente):
+
    ```bash
    clasp create --title "PKL GuildBoard – Minha Guild" --type webapp
    ```
+
    Isso cria um arquivo `.clasp.json` na pasta com o `scriptId` do projeto.
 
 4. **Configure o `.clasp.json`** para apontar para a pasta raiz do projeto:
+
    ```json
    {
      "scriptId": "SEU_SCRIPT_ID",
@@ -149,13 +155,8 @@ O [clasp](https://github.com/google/clasp) permite enviar os arquivos do projeto
    ```
    > Se o editor do Apps Script estiver aberto, feche e reabra para ver os arquivos atualizados.
 
-6. **Abra o projeto no editor para continuar a configuração** (Script Properties, senha, trigger e deploy):
-   ```bash
-   clasp open
-   ```
-
 > Para atualizações futuras, basta editar os arquivos localmente e rodar `clasp push` novamente.
 
 ---
 
-*PKL GuildBoard é uma ferramenta criada pela Guild Arkham para a comunidade de Poke Legends.*
+_PKL GuildBoard é uma ferramenta criada pela Guild Arkham para a comunidade de Poke Legends._
