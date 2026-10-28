@@ -32,7 +32,7 @@ https://docs.google.com/spreadsheets/d/ESTE_E_O_ID/edit
 
 ### 3. Configure as Script Properties
 
-No editor do Apps Script vá em **Projeto → Propriedades do projeto → Propriedades de script** e adicione as chaves abaixo.
+No editor do Apps Script vá em **Configurações do projeto → Propriedades de script → Editar propriedade do Script** e adicione as chaves abaixo.
 
 | Chave                    | Obrigatória            | Descrição                                                                                                                                        |
 | ------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
