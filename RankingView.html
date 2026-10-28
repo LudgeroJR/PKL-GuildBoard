@@ -1,0 +1,639 @@
+<script>
+  const RankingView = (() => {
+    const GUILD_ROLE_LABELS_ = Object.freeze({
+      LEADER: "Líder",
+      VICE_LEADER: "Vice-líder",
+      MEMBER: "Membro",
+    });
+
+    const PODIUM_RANK_CLASSES_ = Object.freeze({
+      1: "first",
+      2: "second",
+      3: "third",
+    });
+
+    /*
+     * options.onData(data): chamado após cada carga válida.
+     * options.onFailure(): chamado quando a carga falha.
+     * Permite à Home reutilizar o payload (activeMemberCount,
+     * topLevelMembers) sem segunda RPC.
+     */
+    function render(options = {}) {
+      const host = document.createElement("div");
+
+      host.className = "pkl-ranking-host";
+      host.setAttribute("aria-live", "polite");
+      host.tabIndex = -1;
+
+      window.queueMicrotask(() => load_(host, options));
+
+      return host;
+    }
+
+    async function load_(host, options, isRetry = false) {
+      if (!host.isConnected) return;
+
+      host.setAttribute("aria-busy", "true");
+
+      const status = document.createElement("p");
+      status.className = "pkl-status";
+      status.setAttribute("role", "status");
+      status.textContent = "Carregando ranking...";
+
+      host.replaceChildren(status, UI.Skeleton({ lines: 6 }));
+
+      try {
+        const data = await ApiClient.requestPublic(
+          "contributions.getPublicRanking",
+          {},
+        );
+
+        if (!host.isConnected) return;
+
+        validatePayload_(data);
+
+        host.replaceChildren(buildLoaded_(data, options));
+
+        if (typeof options.onData === "function") options.onData(data);
+
+        if (isRetry) host.focus();
+      } catch (error) {
+        if (!host.isConnected) return;
+
+        const retry = UI.Button({
+          label: "Tentar novamente",
+          onClick: () => load_(host, options, true),
+        });
+
+        host.replaceChildren(
+          UI.EmptyState({
+            title: "Não foi possível carregar o ranking",
+            description:
+              "Os dados estão indisponíveis no momento. Tente novamente em instantes.",
+            action: retry,
+          }).element,
+        );
+
+        if (typeof options.onFailure === "function") options.onFailure();
+
+        if (isRetry) retry.focus();
+      } finally {
+        host.removeAttribute("aria-busy");
+      }
+    }
+
+    function buildLoaded_(data, options = {}) {
+      const weeks = [data.current].concat(data.history);
+
+      const root = document.createElement("div");
+      root.className = "pkl-ranking-view";
+
+      if (weeks.length === 1) {
+        root.appendChild(buildWeekPanel_(weeks[0], options));
+        return root;
+      }
+
+      const tabItems = weeks.map((week, index) => ({
+        label:
+          index === 0 ? "Semana atual" : formatShortWeekLabel_(week.weekStart),
+        content: buildWeekPanel_(week, options),
+      }));
+
+      const tabsComponent = UI.Tabs({
+        tabs: tabItems,
+        ariaLabel: "Selecionar semana do ranking",
+      });
+
+      root.appendChild(tabsComponent.element);
+      return root;
+    }
+
+    function buildWeekPanel_(week, options = {}) {
+      const panel = document.createElement("div");
+      panel.className = "pkl-ranking-week";
+
+      const header = document.createElement("div");
+      header.className = "pkl-ranking-week__header";
+
+      const period = document.createElement("p");
+      period.className = "pkl-ranking-period";
+      const periodValue = document.createElement("strong");
+      periodValue.textContent = formatWeekPeriod_(week.weekStart, week.weekEnd);
+      period.append("Período: ", periodValue);
+
+      header.append(
+        period,
+        UI.Badge({
+          label: week.isCurrentWeek ? "Semana atual" : "Semana concluída",
+          variant: week.isCurrentWeek ? "info" : "neutral",
+        }),
+      );
+
+      panel.appendChild(header);
+
+      if (week.members.length === 0) {
+        panel.appendChild(
+          UI.EmptyState({
+            title: "Nenhum membro elegível nesta semana",
+            icon: "shield",
+          }).element,
+        );
+      } else {
+        panel.appendChild(buildPodium_(week.members));
+        panel.appendChild(buildRankingList_(week.members));
+      }
+
+      // Indicadores da semana ficam abaixo do ranking (hierarquia: ranking domina).
+      panel.appendChild(buildWeekStats_(week));
+
+      if (week.isCurrentWeek) {
+        const tasksSection = buildTasksRankingSection_(week.tasksRanking);
+        if (options.taskRankingHost) {
+          options.taskRankingHost.replaceChildren(tasksSection);
+        } else {
+          panel.appendChild(tasksSection);
+        }
+      }
+
+      return panel;
+    }
+
+    function buildTasksRankingSection_(tasksRanking) {
+      // Mesmo card e mesma lista do ranking de nível (HomeView.buildTopLevel_).
+      let body;
+
+      if (tasksRanking.length === 0) {
+        body = UI.EmptyState({
+          title: "Nenhum registro de tasks nesta semana",
+          icon: "shield",
+        }).element;
+      } else {
+        body = document.createElement("div");
+        body.className = "pkl-home-toplevel";
+
+        const list = document.createElement("div");
+        list.className = "pkl-home-toplevel__list";
+        list.setAttribute("role", "table");
+        list.setAttribute("aria-label", "Ranking de tasks da semana");
+
+        const header = document.createElement("div");
+        header.className = "pkl-home-toplevel__header";
+        header.setAttribute("role", "row");
+        ["Pos.", "Nome", "Tasks"].forEach(function (label) {
+          const cell = document.createElement("span");
+          cell.setAttribute("role", "columnheader");
+          cell.textContent = label;
+          header.appendChild(cell);
+        });
+        list.appendChild(header);
+
+        tasksRanking.slice(0, 5).forEach(function (entry) {
+          const row = document.createElement("div");
+          const pos = document.createElement("div");
+          const name = document.createElement("div");
+          const meta = document.createElement("div");
+          row.className = "pkl-home-toplevel__item";
+          row.setAttribute("role", "row");
+          pos.className = "pkl-home-toplevel__position";
+          pos.setAttribute("role", "cell");
+          name.className = "pkl-home-toplevel__name";
+          name.setAttribute("role", "cell");
+          meta.className = "pkl-home-toplevel__meta";
+          meta.setAttribute("role", "cell");
+          pos.textContent = entry.position + "°";
+          name.textContent = entry.name;
+          meta.textContent = String(entry.delivered);
+          row.append(pos, name, meta);
+          list.appendChild(row);
+        });
+        body.appendChild(list);
+      }
+
+      return UI.Card({
+        title: "Ranking de tasks",
+        description: "Top 5 de membros que entregaram mais tasks nesta semana.",
+        body,
+      }).element;
+    }
+
+    function buildWeekStats_(week) {
+      const root = document.createElement("div");
+      root.className = "pkl-ranking-stats";
+
+      const hasTarget = week.collectiveTarget > 0;
+
+      const grid = document.createElement("div");
+      grid.className = "pkl-ranking-stats__grid";
+      grid.append(
+        UI.StatCard({
+          label: "Total arrecadado",
+          value: UtilitiesClient.formatGameMoney(week.totalContributed),
+        }).element,
+        UI.StatCard({
+          label: "Meta coletiva",
+          value: UtilitiesClient.formatGameMoney(week.collectiveTarget),
+          supportingText: hasTarget
+            ? ""
+            : "Nenhum membro com meta nesta semana.",
+        }).element,
+        UI.StatCard({
+          label: "Percentual da meta",
+          value: hasTarget
+            ? formatPercent_(week.collectiveProgressPercent)
+            : "Sem meta coletiva",
+        }).element,
+        UI.StatCard({
+          label: "Membros que cumpriram a meta",
+          value: String(week.targetMetCount),
+        }).element,
+      );
+      root.appendChild(grid);
+
+      if (hasTarget) {
+        root.appendChild(
+          UI.Progress({
+            label: "Progresso da meta coletiva",
+            value: Math.min(week.collectiveProgressPercent, 100),
+            max: 100,
+            variant:
+              week.collectiveProgressPercent >= 100 ? "success" : "primary",
+            valueText: formatPercent_(week.collectiveProgressPercent),
+          }).element,
+        );
+      }
+
+      return root;
+    }
+
+    function formatPercent_(value) {
+      return (
+        new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(
+          value,
+        ) + "%"
+      );
+    }
+
+    function buildPodium_(members) {
+      // O pódio é uma vitrine de exatamente três cards. Empates continuam
+      // ordenados pelo ranking autoritativo (nome alfabético), mas não ampliam
+      // a quantidade exibida.
+      const podiumMembers = members.slice(0, 3);
+
+      const root = document.createElement("div");
+      root.className = "pkl-podium";
+      root.setAttribute("role", "list");
+      root.setAttribute("aria-label", "Pódio da semana");
+
+      podiumMembers.forEach((member, index) => {
+        root.appendChild(buildPodiumSlot_(member, index + 1));
+      });
+
+      return root;
+    }
+
+    function buildPodiumSlot_(member, slotNumber) {
+      // O slot (layout e cor) segue a ordem do ranking autoritativo; o número
+      // exibido continua sendo member.position, então empates aparecem como tal.
+      const rankClass = PODIUM_RANK_CLASSES_[slotNumber];
+
+      const slot = document.createElement("div");
+      slot.className = `pkl-podium__slot pkl-podium__slot--${rankClass}`;
+      slot.setAttribute("role", "listitem");
+
+      const position = document.createElement("span");
+      position.className = "pkl-podium__position";
+      position.textContent = `${member.position}º`;
+
+      const name = document.createElement("p");
+      name.className = "pkl-podium__name";
+      name.textContent = member.name;
+
+      const role = document.createElement("p");
+      role.className = "pkl-podium__role";
+      role.textContent = formatGuildRoleLabel_(member.guildRole);
+
+      const amount = document.createElement("p");
+      amount.className = "pkl-podium__amount";
+      amount.textContent = UtilitiesClient.formatGameMoney(member.amount);
+
+      slot.append(position, name, role, amount);
+
+      if (member.targetRequired === true && member.targetMet === true) {
+        slot.appendChild(
+          UI.Badge({ label: "Meta cumprida", variant: "success" }),
+        );
+      } else if (member.targetRequired === false) {
+        slot.appendChild(UI.Badge({ label: "Sem meta", variant: "neutral" }));
+      }
+
+      return slot;
+    }
+
+    function buildRankingList_(members) {
+      const root = document.createElement("div");
+      root.className = "pkl-ranking-list";
+      root.setAttribute("role", "table");
+      root.setAttribute("aria-label", "Ranking completo da semana");
+
+      const header = document.createElement("div");
+      header.className = "pkl-ranking-list__header";
+      header.setAttribute("role", "row");
+
+      [
+        "Posição",
+        "Nome",
+        "Cargo",
+        "Nível",
+        "Contribuição",
+        "Task",
+        "Meta",
+      ].forEach((label) => {
+        const cell = document.createElement("span");
+        cell.setAttribute("role", "columnheader");
+        cell.textContent = label;
+        header.appendChild(cell);
+      });
+
+      root.appendChild(header);
+
+      members.forEach((member) => {
+        root.appendChild(buildRankingRow_(member));
+      });
+
+      return root;
+    }
+
+    function buildRankingRow_(member) {
+      const row = document.createElement("div");
+      row.className = "pkl-ranking-row";
+      row.setAttribute("role", "row");
+
+      const rankClass = PODIUM_RANK_CLASSES_[member.position];
+
+      if (rankClass) {
+        row.classList.add(`pkl-ranking-row--rank-${rankClass}`);
+      } else if (member.targetRequired === true && member.targetMet === true) {
+        row.classList.add("pkl-ranking-row--target-met");
+      }
+
+      row.appendChild(
+        buildRankingCell_("position", "Posição", `${member.position}º`),
+      );
+      row.appendChild(buildRankingCell_("name", "Nome", member.name));
+      row.appendChild(
+        buildRankingCell_(
+          "role",
+          "Cargo",
+          formatGuildRoleLabel_(member.guildRole),
+        ),
+      );
+      row.appendChild(
+        buildRankingCell_("level", "Nível", String(member.level)),
+      );
+      row.appendChild(
+        buildRankingCell_(
+          "amount",
+          "Contribuição",
+          UtilitiesClient.formatGameMoney(member.amount),
+        ),
+      );
+      row.appendChild(
+        buildRankingCell_(
+          "tasks",
+          "Task",
+          member.tasksDelivered === null || member.tasksDelivered === undefined
+            ? "—"
+            : String(member.tasksDelivered),
+        ),
+      );
+
+      const targetCell = document.createElement("div");
+      targetCell.className =
+        "pkl-ranking-row__cell pkl-ranking-row__cell--target";
+      targetCell.setAttribute("role", "cell");
+      targetCell.setAttribute("data-label", "Meta");
+      targetCell.appendChild(buildTargetCell_(member));
+      row.appendChild(targetCell);
+
+      return row;
+    }
+
+    function buildRankingCell_(modifier, label, value) {
+      const cell = document.createElement("div");
+      cell.className = `pkl-ranking-row__cell pkl-ranking-row__cell--${modifier}`;
+      cell.setAttribute("role", "cell");
+      cell.setAttribute("data-label", label);
+
+      const valueElement = document.createElement("span");
+      valueElement.className = "pkl-ranking-row__value";
+      valueElement.textContent = value;
+
+      cell.appendChild(valueElement);
+      return cell;
+    }
+
+    function buildTargetCell_(member) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "pkl-ranking-row__target";
+
+      if (member.targetRequired === false) {
+        wrapper.appendChild(
+          UI.Badge({ label: "Sem meta", variant: "neutral" }),
+        );
+        return wrapper;
+      }
+
+      const text = document.createElement("span");
+      text.className = "pkl-ranking-row__target-text";
+      text.textContent = `${UtilitiesClient.formatGameMoney(member.amount)} / ${UtilitiesClient.formatGameMoney(member.targetAmount)}`;
+      wrapper.appendChild(text);
+
+      if (member.targetMet === true) {
+        wrapper.appendChild(
+          UI.Badge({ label: "Meta cumprida", variant: "success" }),
+        );
+      }
+
+      return wrapper;
+    }
+
+    function formatGuildRoleLabel_(guildRole) {
+      const label = GUILD_ROLE_LABELS_[guildRole];
+
+      if (!label) {
+        throw new Error(`Cargo de membro desconhecido: ${guildRole}.`);
+      }
+
+      return label;
+    }
+
+    function formatWeekPeriod_(weekStart, weekEnd) {
+      return `${formatOfficialDateTime_(weekStart)} até ${formatOfficialDateTime_(weekEnd)}`;
+    }
+
+    function formatOfficialDateTime_(value) {
+      const date = new Date(value);
+
+      if (Number.isNaN(date.getTime())) {
+        throw new Error("Datetime inválido recebido da API.");
+      }
+
+      return new Intl.DateTimeFormat("pt-BR", {
+        timeZone: resolveTimezone_(),
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(date);
+    }
+
+    function formatShortWeekLabel_(value) {
+      const date = new Date(value);
+
+      if (Number.isNaN(date.getTime())) {
+        throw new Error("Data de semana inválida recebida da API.");
+      }
+
+      return new Intl.DateTimeFormat("pt-BR", {
+        timeZone: resolveTimezone_(),
+        day: "2-digit",
+        month: "2-digit",
+      }).format(date);
+    }
+
+    function resolveTimezone_() {
+      const app = State.get().app;
+
+      if (
+        !app ||
+        typeof app.timezone !== "string" ||
+        app.timezone.trim() === ""
+      ) {
+        throw new Error("Timezone oficial indisponível.");
+      }
+
+      return app.timezone;
+    }
+
+    function validatePayload_(data) {
+      if (!data || typeof data !== "object" || Array.isArray(data)) {
+        throw new Error("Ranking público inválido.");
+      }
+
+      if (
+        !Number.isInteger(data.activeMemberCount) ||
+        data.activeMemberCount < 0
+      ) {
+        throw new Error("activeMemberCount inválido.");
+      }
+
+      if (!Array.isArray(data.topLevelMembers)) {
+        throw new Error("topLevelMembers inválido.");
+      }
+
+      validateWeek_(data.current, true);
+
+      if (!Array.isArray(data.history) || data.history.length > 5) {
+        throw new Error("Histórico de ranking inválido.");
+      }
+
+      data.history.forEach((week) => validateWeek_(week, false));
+
+      return data;
+    }
+
+    function validateWeek_(week, expectCurrent) {
+      if (
+        !week ||
+        typeof week !== "object" ||
+        typeof week.weekKey !== "string" ||
+        typeof week.weekStart !== "string" ||
+        typeof week.weekEnd !== "string" ||
+        typeof week.isCurrentWeek !== "boolean" ||
+        week.isCurrentWeek !== expectCurrent ||
+        !Number.isInteger(week.collectiveTarget) ||
+        week.collectiveTarget < 0 ||
+        !Number.isInteger(week.totalContributed) ||
+        week.totalContributed < 0 ||
+        typeof week.collectiveProgressPercent !== "number" ||
+        !Number.isFinite(week.collectiveProgressPercent) ||
+        !Number.isInteger(week.targetMetCount) ||
+        week.targetMetCount < 0 ||
+        !Array.isArray(week.members)
+      ) {
+        throw new Error("Semana de ranking inválida.");
+      }
+
+      week.members.forEach(validateRankedMember_);
+
+      if (expectCurrent) {
+        if (!Array.isArray(week.tasksRanking)) {
+          throw new Error("tasksRanking inválido.");
+        }
+        week.tasksRanking.forEach(validateRankedTaskEntry_);
+      }
+    }
+
+    function validateRankedTaskEntry_(entry) {
+      if (
+        !entry ||
+        typeof entry !== "object" ||
+        typeof entry.memberId !== "string" ||
+        typeof entry.name !== "string" ||
+        entry.name.trim() === "" ||
+        !Number.isInteger(entry.position) ||
+        entry.position < 1 ||
+        !Number.isInteger(entry.delivered) ||
+        entry.delivered < 0
+      ) {
+        throw new Error("Entrada de ranking de tasks inválida.");
+      }
+    }
+
+    function validateRankedMember_(member) {
+      if (
+        !member ||
+        typeof member !== "object" ||
+        typeof member.memberId !== "string" ||
+        !Number.isInteger(member.position) ||
+        member.position < 1 ||
+        typeof member.name !== "string" ||
+        member.name.trim() === "" ||
+        !Object.prototype.hasOwnProperty.call(
+          GUILD_ROLE_LABELS_,
+          member.guildRole,
+        ) ||
+        !Number.isInteger(member.level) ||
+        member.level < 0 ||
+        !Number.isInteger(member.amount) ||
+        member.amount < 0 ||
+        typeof member.targetRequired !== "boolean" ||
+        !Number.isInteger(member.targetAmount) ||
+        member.targetAmount < 0 ||
+        (member.targetMet !== null && typeof member.targetMet !== "boolean")
+      ) {
+        throw new Error("Membro do ranking inválido.");
+      }
+
+      if (member.targetRequired === false && member.targetMet !== null) {
+        throw new Error(
+          "targetMet deve ser null quando não há obrigação de meta.",
+        );
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(member, "tasksDelivered") &&
+        member.tasksDelivered !== null &&
+        (!Number.isInteger(member.tasksDelivered) || member.tasksDelivered < 0)
+      ) {
+        throw new Error("Membro do ranking inválido.");
+      }
+    }
+
+    return {
+      render,
+    };
+  })();
+</script>

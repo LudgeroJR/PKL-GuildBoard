@@ -1,0 +1,526 @@
+<script>
+  const SkillAdminView = (() => {
+    const STATUS = Object.freeze({
+      LOCKED: {label: "Bloqueada", variant: "danger"},
+      AVAILABLE: {label: "Disponível", variant: "info"},
+      IN_PROGRESS: {label: "Em progresso", variant: "info"},
+      AWAITING_LEVEL_CONFIG: {label: "Sem etapas na API", variant: "warning"},
+      COMPLETED: {label: "Concluída", variant: "success"},
+    });
+
+    function render(options = {}) {
+      const root = document.createElement("section");
+      const heading = document.createElement("div");
+      const progression = SkillProgressionAdminView.render(options);
+      const catalog = renderCatalog_(options);
+      const tabs = UI.Tabs({
+        ariaLabel: "Administração de habilidades",
+        onChange(index) {
+          if (index === 0) SkillProgressionAdminView.refresh(progression);
+        },
+        tabs: [
+          {label: "Progressão", content: progression},
+          {label: "Catálogo", content: catalog},
+        ],
+      });
+
+      root.className = "pkl-skill-hub";
+      root.setAttribute("aria-labelledby", "pkl-skill-hub-title");
+      heading.className = "pkl-skill-hub__header";
+      heading.innerHTML =
+        '<h2 id="pkl-skill-hub-title" class="pkl-skill-hub__title">Habilidades</h2>' +
+        '<p class="pkl-skill-hub__description">Consulte a progressão da API e mantenha nomes, buffs e relações do catálogo local.</p>';
+      root.append(heading, tabs.element);
+      return root;
+    }
+
+    function renderCatalog_(options = {}) {
+      const root = document.createElement("section");
+      root.className = "pkl-skill-admin";
+      root.setAttribute("aria-label", "Catálogo de habilidades");
+      window.queueMicrotask(() => load_(root, options));
+      return root;
+    }
+
+    async function load_(root, options) {
+      if (!root.isConnected) return;
+      root.setAttribute("aria-busy", "true");
+      const loading = document.createElement("div");
+      const status = document.createElement("p");
+      loading.className = "pkl-skill-admin__loading";
+      status.className = "pkl-status";
+      status.setAttribute("role", "status");
+      status.textContent = "Carregando catálogo de habilidades...";
+      loading.append(status, UI.Skeleton({lines: 4}));
+      root.replaceChildren(loading);
+      try {
+        const catalog = await ApiClient.request("skills.getAdminCatalog", {});
+        if (!root.isConnected) return;
+        validateCatalog_(catalog);
+        renderCatalogContent_(root, catalog, options);
+      } catch (error) {
+        if (!root.isConnected || handleAuth_(error, options)) return;
+        const retry = UI.Button({label: "Tentar novamente", variant: "secondary", onClick: () => load_(root, options)});
+        const empty = UI.EmptyState({
+          title: "Não foi possível carregar as habilidades",
+          description: error && error.code === "CONFLICT" ? error.message : "Tente novamente para consultar os dados atuais.",
+          action: retry,
+        });
+        empty.element.setAttribute("role", "alert");
+        root.replaceChildren(empty.element);
+        retry.focus();
+      } finally {
+        root.removeAttribute("aria-busy");
+      }
+    }
+
+    function renderCatalogContent_(root, catalog, options, focusSkillId = null) {
+      let editor = null;
+      let editorTransitionPending = false;
+      let editorReturnFocus = null;
+      const header = document.createElement("div");
+      const heading = document.createElement("div");
+      const create = UI.Button({label: "Nova habilidade", onClick: () => open_(null)});
+      const layout = document.createElement("div");
+      const list = document.createElement("div");
+      const editorHost = document.createElement("div");
+      header.className = "pkl-skill-admin__header";
+      heading.innerHTML = '<h2 class="pkl-skill-admin__title">Catálogo de habilidades</h2><p class="pkl-skill-admin__description">Nomes amigáveis, buffs e pré-requisitos são locais. Vincule apiSkillId antes de sincronizar habilidades existentes.</p>';
+      header.append(heading, create);
+      layout.className = "pkl-skill-admin__layout";
+      list.className = "pkl-skill-admin__content";
+      editorHost.className = "pkl-skill-admin__editor-host";
+      editorHost.hidden = true;
+      layout.append(list, editorHost);
+      renderList_();
+      root.replaceChildren(header, layout);
+      if (focusSkillId) {
+        window.queueMicrotask(() => {
+          const savedSkillButton = Array.from(root.querySelectorAll("[data-skill-id]")).find(
+            button => button.dataset.skillId === focusSkillId && button.offsetParent !== null,
+          );
+          if (savedSkillButton) savedSkillButton.focus();
+        });
+      }
+
+      function renderList_() {
+        if (catalog.length === 0) {
+          const first = UI.Button({label: "Cadastrar primeira habilidade", onClick: () => open_(null)});
+          list.replaceChildren(UI.EmptyState({title: "Nenhuma habilidade cadastrada", description: "Cadastre a primeira habilidade para iniciar o catálogo.", action: first}).element);
+          return;
+        }
+        list.replaceChildren(desktop_(catalog, open_, link_), mobile_(catalog, open_, link_));
+      }
+
+      async function open_(skill) {
+        if (editorTransitionPending) return;
+        const trigger = document.activeElement;
+        editorTransitionPending = true;
+        try {
+          if (editor && editor.isDirty() && !(await discard_())) return;
+          if (!root.isConnected) return;
+          editorReturnFocus = trigger instanceof HTMLElement && root.contains(trigger) ? trigger : create;
+          editor = buildEditor_({catalog, skill, options, onCancel: close_, onSaved: saved_});
+          layout.classList.add("has-editor");
+          editorHost.hidden = false;
+          editorHost.replaceChildren(editor.element);
+          editor.focus();
+          editorHost.scrollIntoView({behavior: "smooth", block: "start"});
+        } finally {
+          editorTransitionPending = false;
+        }
+      }
+
+      async function close_() {
+        if (editorTransitionPending) return;
+        editorTransitionPending = true;
+        try {
+          if (editor && editor.isDirty() && !(await discard_())) return;
+          if (!root.isConnected) return;
+          editor = null;
+          layout.classList.remove("has-editor");
+          editorHost.hidden = true;
+          editorHost.replaceChildren();
+          const focusTarget = editorReturnFocus && editorReturnFocus.isConnected ? editorReturnFocus : create;
+          editorReturnFocus = null;
+          focusTarget.focus();
+        } finally {
+          editorTransitionPending = false;
+        }
+      }
+
+      function saved_(skill) {
+        const next = catalog.filter(item => item.skillId !== skill.skillId);
+        next.push(skill);
+        validateCatalog_(next);
+        renderCatalogContent_(root, next, options, skill.skillId);
+      }
+
+      async function link_(skill) {
+        try {
+          const candidates = await ApiClient.request("skills.getUnlinkedApiSkills", {});
+          if (!root.isConnected) return;
+          if (!Array.isArray(candidates)) throw new Error("Lista de vínculos inválida.");
+          if (candidates.length === 0) {
+            UI.Toast({variant: "info", title: "Nenhum vínculo pendente",
+              message: "A API não apresentou habilidades sem vínculo."});
+            return;
+          }
+          const selector = UI.Select({label: "Habilidade da API", name: "apiSkillId",
+            placeholder: "Selecione a habilidade correspondente",
+            options: candidates.map(item => ({value: item.apiSkillId,
+              label: `${item.name} (${item.apiSkillId}) — ${item.totalLevels} níveis`}))});
+          const error = document.createElement("p");
+          error.className = "pkl-status pkl-status--error";
+          error.setAttribute("role", "alert");
+          error.hidden = true;
+          const cancel = UI.Button({label: "Cancelar", variant: "secondary"});
+          const save = UI.Button({label: "Vincular", type: "button"});
+          const footer = document.createElement("div");
+          footer.append(cancel, save);
+          const modal = UI.Modal({title: `Vincular ${skill.name} à API`,
+            description: "O nome amigável e o ID interno serão preservados. O total de níveis deve corresponder à API.",
+            body: [selector.element, error], footer, initialFocus: selector.select});
+          cancel.addEventListener("click", () => modal.close("cancel"));
+          save.addEventListener("click", async () => {
+            if (!selector.select.value) {
+              selector.setError("Selecione uma habilidade da API.");
+              selector.select.focus();
+              return;
+            }
+            UI.setButtonLoading(save, true, "Vinculando...");
+            try {
+              const linked = await ApiClient.request("skills.linkApiSkill", {
+                skillId: skill.skillId, apiSkillId: selector.select.value,
+              });
+              modal.close("saved");
+              if (!root.isConnected) return;
+              saved_(linked);
+              UI.Toast({variant: "success", title: "Vínculo salvo",
+                message: `${linked.name} foi vinculada à API.`});
+            } catch (failure) {
+              if (handleAuth_(failure, options)) { modal.close("auth-required"); return; }
+              error.textContent = failure && failure.message ? failure.message : "Não foi possível vincular.";
+              error.hidden = false;
+            } finally {
+              if (save.isConnected) UI.setButtonLoading(save, false);
+            }
+          });
+          modal.open();
+        } catch (error) {
+          if (handleAuth_(error, options)) return;
+          UI.Toast({variant: "danger", title: "Falha ao consultar a API",
+            message: error && error.message ? error.message : "Tente novamente."});
+        }
+      }
+    }
+
+    function desktop_(catalog, edit, link) {
+      const table = UI.Table({
+        caption: "Habilidades cadastradas",
+        columns: [
+          {key: "name", label: "Nome"}, {key: "levels", label: "Níveis", align: "center"},
+          {key: "status", label: "Status"}, {key: "apiSkillId", label: "API"}, {key: "requirements", label: "Pré-requisitos"},
+          {key: "actions", label: "Ações", align: "end"},
+        ],
+        rows: catalog.map(skill => ({
+          name: skill.name, levels: String(skill.totalLevels), status: badge_(skill.status),
+          apiSkillId: skill.apiSkillId || "Sem vínculo",
+          requirements: requirementsText_(skill, catalog), actions: actions_(skill, edit, link),
+        })),
+      });
+      table.element.classList.add("pkl-skill-admin__desktop");
+      return table.element;
+    }
+
+    function mobile_(catalog, edit, link) {
+      const list = document.createElement("div");
+      list.className = "pkl-skill-admin__mobile";
+      catalog.forEach(skill => {
+        const card = document.createElement("article");
+        const head = document.createElement("div");
+        const name = document.createElement("h3");
+        const details = document.createElement("dl");
+        const actions = document.createElement("div");
+        card.className = "pkl-skill-card";
+        head.className = "pkl-skill-card__header";
+        name.className = "pkl-skill-card__name";
+        name.textContent = skill.name;
+        details.className = "pkl-skill-card__details";
+        details.append(detail_("Níveis", skill.totalLevels), detail_("API", skill.apiSkillId || "Sem vínculo"), detail_("Pré-requisitos", requirementsText_(skill, catalog)));
+        actions.className = "pkl-skill-card__actions";
+        actions.append(actions_(skill, edit, link));
+        head.append(name, badge_(skill.status));
+        card.append(head, details, actions);
+        list.append(card);
+      });
+      return list;
+    }
+
+    function buildEditor_(settings) {
+      const original = settings.skill;
+      const descriptions = Object.create(null);
+      (original ? original.buffs : []).forEach(buff => { descriptions[buff.level] = buff.description; });
+      const requirements = (original ? original.requirements : []).map(item => ({requiredSkillId: item.requiredSkillId, minimumLevel: item.minimumLevel}));
+      const root = document.createElement("section");
+      const title = document.createElement("h3");
+      const form = document.createElement("form");
+      const basics = document.createElement("div");
+      const name = UI.Input({label: "Nome da habilidade", value: original ? original.name : "", required: true, autocomplete: "off", helperText: "De 1 a 100 caracteres."});
+      const levels = UI.Input({label: "Quantidade total de níveis", type: "number", value: original ? original.totalLevels : 1, required: true,
+        helperText: original && original.apiSkillId ? "Limite governado pela API da Guild." : "Número inteiro maior ou igual a 1."});
+      const notice = document.createElement("p");
+      const buffSection = section_("Buffs por nível");
+      const requirementSection = section_("Pré-requisitos");
+      const addRequirement = UI.Button({label: "Adicionar pré-requisito", variant: "secondary", onClick: addRequirement_});
+      const requirementHeader = requirementSection.element.querySelector(".pkl-skill-editor__section-header");
+      const error = document.createElement("p");
+      const dirty = document.createElement("p");
+      const actions = document.createElement("div");
+      const cancel = UI.Button({label: "Cancelar", variant: "secondary", onClick: settings.onCancel});
+      const save = UI.Button({label: original ? "Salvar alterações" : "Cadastrar habilidade", type: "submit"});
+      let buffFields = [];
+      let requirementControls = [];
+      let busy = false;
+
+      root.className = "pkl-skill-editor";
+      title.id = UtilitiesClient.createDomId("pkl-skill-editor");
+      title.className = "pkl-skill-editor__title";
+      title.textContent = original ? `Editar ${original.name}` : "Cadastrar habilidade";
+      root.setAttribute("aria-labelledby", title.id);
+      form.className = "pkl-skill-editor__form";
+      form.noValidate = true;
+      basics.className = "pkl-skill-editor__basic";
+      levels.input.min = "1"; levels.input.step = "1"; levels.input.inputMode = "numeric";
+      levels.input.disabled = !!(original && original.apiSkillId);
+      notice.className = "pkl-skill-editor__structural-notice"; notice.setAttribute("role", "status"); notice.hidden = true;
+      requirementHeader.append(addRequirement);
+      error.className = "pkl-status pkl-status--error"; error.setAttribute("role", "alert"); error.tabIndex = -1; error.hidden = true;
+      dirty.className = "pkl-skill-editor__dirty-status"; dirty.setAttribute("role", "status"); dirty.setAttribute("aria-live", "polite");
+      actions.className = "pkl-skill-editor__actions"; actions.append(cancel, save);
+      basics.append(name.element, levels.element);
+      form.append(basics, notice, buffSection.element, requirementSection.element, error, dirty, actions);
+      root.append(title, form);
+      renderBuffs_(); renderRequirements_();
+      const baseline = state_();
+
+      name.input.addEventListener("input", changed_);
+      levels.input.addEventListener("input", () => { captureBuffs_(); if (positive_(levels.input.value) !== null) renderBuffs_(); changed_(); });
+      form.addEventListener("submit", submit_);
+      refresh_();
+
+      function renderBuffs_() {
+        const total = positive_(levels.input.value); if (total === null) return;
+        buffSection.body.replaceChildren(); buffFields = [];
+        for (let level = 1; level <= total; level += 1) {
+          const field = textarea_(`Nível ${level}`, descriptions[level] || "");
+          field.input.addEventListener("input", () => { descriptions[level] = field.input.value; field.error(null); changed_(); });
+          buffFields.push({level, field}); buffSection.body.append(field.element);
+        }
+      }
+
+      function captureBuffs_() { buffFields.forEach(item => { descriptions[item.level] = item.field.input.value; }); }
+
+      function renderRequirements_() {
+        requirementSection.body.replaceChildren(); requirementControls = [];
+        const candidates = settings.catalog.filter(skill => !original || skill.skillId !== original.skillId);
+        if (!requirements.length) {
+          const empty = document.createElement("p"); empty.className = "pkl-skill-editor__empty-requirements"; empty.textContent = "Nenhum pré-requisito configurado."; requirementSection.body.append(empty);
+        }
+        requirements.forEach((model, index) => {
+          const row = document.createElement("div");
+          const skill = UI.Select({label: "Habilidade requerida", required: true, value: model.requiredSkillId, placeholder: "Selecione uma habilidade", options: candidates.map(item => ({value: item.skillId, label: item.name}))});
+          const minimum = UI.Input({label: "Nível mínimo", type: "number", value: model.minimumLevel || 1, required: true});
+          const remove = UI.Button({label: "Remover", variant: "ghost", onClick: () => { requirements.splice(index, 1); renderRequirements_(); changed_(); }});
+          row.className = "pkl-skill-requirement-row";
+          minimum.input.min = "1"; minimum.input.step = "1"; minimum.input.inputMode = "numeric";
+          remove.setAttribute("aria-label", `Remover pré-requisito ${index + 1}`);
+          skill.select.addEventListener("change", () => {
+            model.requiredSkillId = skill.select.value;
+            const selected = byId_(settings.catalog, model.requiredSkillId);
+            if (selected) {
+              minimum.input.max = String(selected.totalLevels);
+              const current = positive_(minimum.input.value);
+              if (current === null || current > selected.totalLevels) minimum.input.value = String(selected.totalLevels);
+            }
+            model.minimumLevel = positive_(minimum.input.value); refreshOptions_(); changed_();
+          });
+          minimum.input.addEventListener("input", () => { model.minimumLevel = positive_(minimum.input.value); minimum.setError(null); changed_(); });
+          const selected = byId_(settings.catalog, model.requiredSkillId); if (selected) minimum.input.max = String(selected.totalLevels);
+          row.append(skill.element, minimum.element, remove); requirementSection.body.append(row);
+          requirementControls.push({skill, minimum});
+        });
+        addRequirement.disabled = !candidates.length || requirements.length >= candidates.length;
+        refreshOptions_();
+      }
+
+      function refreshOptions_() {
+        const selected = requirementControls.map(item => item.skill.select.value).filter(Boolean);
+        requirementControls.forEach(control => Array.from(control.skill.select.options).forEach(option => {
+          if (option.value) option.disabled = option.value !== control.skill.select.value && selected.includes(option.value);
+        }));
+      }
+
+      function addRequirement_() {
+        const used = requirements.map(item => item.requiredSkillId);
+        const available = settings.catalog.find(skill => (!original || skill.skillId !== original.skillId) && !used.includes(skill.skillId));
+        if (!available) return;
+        requirements.push({requiredSkillId: available.skillId, minimumLevel: 1}); renderRequirements_(); changed_();
+        requirementControls[requirementControls.length - 1].skill.select.focus();
+      }
+
+      function state_() {
+        captureBuffs_(); const total = positive_(levels.input.value);
+        return JSON.stringify({
+          name: name.input.value, totalLevels: total === null ? levels.input.value : total,
+          buffs: total === null ? [] : Array.from({length: total}, (_, index) => descriptions[index + 1] || ""),
+          requirements: requirementControls.map(item => ({requiredSkillId: item.skill.select.value, minimumLevel: item.minimum.input.value})),
+        });
+      }
+
+      function changed_() { name.setError(null); levels.setError(null); error.hidden = true; refresh_(); }
+      function isDirty_() { return state_() !== baseline; }
+      function refresh_() {
+        const total = positive_(levels.input.value);
+        const reducing = original && total !== null && total < original.totalLevels;
+        notice.hidden = !reducing;
+        notice.textContent = reducing ? `Ao salvar, os buffs dos níveis ${total + 1} a ${original.totalLevels} serão removidos. As descrições permanecem neste formulário se você aumentar o total novamente antes de salvar.` : "";
+        dirty.textContent = busy ? "Salvando o catálogo..." : isDirty_() ? "Há alterações não salvas." : "Nenhuma alteração pendente.";
+        save.disabled = busy || !isDirty_();
+      }
+
+      function payload_() {
+        captureBuffs_(); let first = null;
+        const skillName = name.input.value.trim(); const total = positive_(levels.input.value);
+        name.setError(null); levels.setError(null);
+        if (!skillName || skillName.length > 100) { name.setError("Informe um nome entre 1 e 100 caracteres."); first = name.input; }
+        if (total === null) { levels.setError("Informe um número inteiro maior ou igual a 1."); if (!first) first = levels.input; }
+        const buffs = [];
+        buffFields.forEach(item => {
+          const description = item.field.input.value.trim();
+          const message = !description ? "Descreva o buff deste nível." : description.length > 500 ? "Use no máximo 500 caracteres." : null;
+          item.field.error(message); if (message && !first) first = item.field.input; buffs.push({level: item.level, description});
+        });
+        const seen = Object.create(null); const finalRequirements = [];
+        requirementControls.forEach(control => {
+          const requiredSkillId = control.skill.select.value; const minimumLevel = positive_(control.minimum.input.value); const required = byId_(settings.catalog, requiredSkillId);
+          let skillError = !required ? "Selecione uma habilidade válida." : seen[requiredSkillId] ? "Este pré-requisito já foi adicionado." : null;
+          let levelError = minimumLevel === null ? "Informe um número inteiro maior ou igual a 1." : required && minimumLevel > required.totalLevels ? `O máximo desta habilidade é ${required.totalLevels}.` : null;
+          control.skill.setError(skillError); control.minimum.setError(levelError);
+          if (skillError && !first) first = control.skill.select; if (levelError && !first) first = control.minimum.input;
+          if (requiredSkillId) seen[requiredSkillId] = true; finalRequirements.push({requiredSkillId, minimumLevel});
+        });
+        if (first || total === null) { first.focus(); return null; }
+        return Object.assign(original ? {skillId: original.skillId} : {}, {name: skillName, totalLevels: total, buffs, requirements: finalRequirements});
+      }
+
+      async function submit_(event) {
+        event.preventDefault(); if (busy || !isDirty_()) return;
+        const payload = payload_(); if (!payload) return;
+        busy = true; busy_(true);
+        try {
+          if (structural_(payload)) {
+            const confirmed = await UI.ConfirmDialog({title: "Confirmar alterações estruturais?", message: structuralMessage_(payload), confirmLabel: "Salvar alterações"}).open();
+            if (!confirmed || !root.isConnected) return;
+          }
+          UI.setButtonLoading(save, true, "Salvando...");
+          const saved = await ApiClient.request(original ? "skills.updateCatalogSkill" : "skills.createCatalogSkill", payload);
+          if (!root.isConnected) return;
+          validateCatalog_([saved].concat(settings.catalog.filter(skill => skill.skillId !== saved.skillId)));
+          UI.Toast({variant: "success", title: original ? "Habilidade atualizada" : "Habilidade cadastrada", message: `${saved.name} foi salva com sucesso.`});
+          settings.onSaved(saved);
+        } catch (failure) {
+          if (!root.isConnected || handleAuth_(failure, settings.options)) return;
+          error.textContent = failure && failure.message ? failure.message : "Não foi possível salvar. Suas alterações foram preservadas.";
+          error.hidden = false; error.focus();
+        } finally {
+          busy = false;
+          if (root.isConnected) { UI.setButtonLoading(save, false); busy_(false); refresh_(); }
+        }
+      }
+
+      function structural_(payload) {
+        if (!original) return false;
+        const ids = payload.requirements.map(item => item.requiredSkillId);
+        return payload.totalLevels < original.totalLevels || original.requirements.some(item => !ids.includes(item.requiredSkillId));
+      }
+      function structuralMessage_(payload) {
+        const messages = [];
+        if (payload.totalLevels < original.totalLevels) messages.push(`Os buffs acima do nível ${payload.totalLevels} serão removidos.`);
+        const ids = payload.requirements.map(item => item.requiredSkillId);
+        const removed = original.requirements.filter(item => !ids.includes(item.requiredSkillId)).length;
+        if (removed) messages.push(`${removed} pré-requisito(s) serão removidos.`);
+        messages.push("Deseja salvar o aggregate completo?"); return messages.join("\n\n");
+      }
+      function busy_(value) {
+        form.toggleAttribute("aria-busy", value);
+        Array.from(form.querySelectorAll("button,input,select,textarea")).forEach(control => { control.disabled = value; });
+        if (!value) {
+          levels.input.disabled = !!(original && original.apiSkillId);
+          addRequirement.disabled = settings.catalog.length - (original ? 1 : 0) <= requirements.length;
+          refreshOptions_();
+        }
+      }
+
+      return {element: root, focus: () => name.input.focus(), isDirty: isDirty_};
+    }
+
+    function section_(title) {
+      const element = document.createElement("section"); const header = document.createElement("div"); const heading = document.createElement("h4"); const body = document.createElement("div");
+      element.className = "pkl-skill-editor__section"; header.className = "pkl-skill-editor__section-header"; heading.className = "pkl-skill-editor__section-title"; heading.textContent = title; body.className = title.startsWith("Buff") ? "pkl-skill-editor__buffs" : "pkl-skill-editor__requirements";
+      header.append(heading); element.append(header, body); return {element, body};
+    }
+
+    function textarea_(labelText, value) {
+      const element = document.createElement("div"); const label = document.createElement("label"); const input = document.createElement("textarea"); const helper = document.createElement("div"); const id = UtilitiesClient.createDomId("pkl-skill-buff"); let errorElement = null;
+      element.className = "pkl-field"; label.className = "pkl-field__label"; label.htmlFor = id; label.textContent = labelText;
+      input.id = id; input.className = "pkl-input pkl-skill-editor__textarea"; input.value = value; input.required = true; input.maxLength = 500; input.rows = 3;
+      helper.id = UtilitiesClient.createDomId("pkl-helper"); helper.className = "pkl-field__helper"; helper.textContent = "Descrição obrigatória, até 500 caracteres."; input.setAttribute("aria-describedby", helper.id); element.append(label, input, helper);
+      return {element, input, error(message) {
+        if (!message) { if (errorElement) errorElement.remove(); errorElement = null; element.classList.remove("has-error"); input.removeAttribute("aria-invalid"); input.setAttribute("aria-describedby", helper.id); return; }
+        if (!errorElement) { errorElement = document.createElement("div"); errorElement.id = UtilitiesClient.createDomId("pkl-error"); errorElement.className = "pkl-field__error"; errorElement.setAttribute("role", "alert"); element.append(errorElement); }
+        errorElement.textContent = message; element.classList.add("has-error"); input.setAttribute("aria-invalid", "true"); input.setAttribute("aria-describedby", `${helper.id} ${errorElement.id}`);
+      }};
+    }
+
+    function editButton_(skill, edit) { const button = UI.Button({label: "Editar", variant: "secondary", onClick: () => edit(skill)}); button.setAttribute("aria-label", `Editar ${skill.name}`); button.dataset.skillId = skill.skillId; return button; }
+    function actions_(skill, edit, link) {
+      const group = document.createElement("div");
+      group.append(editButton_(skill, edit));
+      if (!skill.apiSkillId) {
+        const button = UI.Button({label: "Vincular API", variant: "secondary", onClick: () => link(skill)});
+        button.setAttribute("aria-label", `Vincular ${skill.name} à API`);
+        group.append(button);
+      }
+      return group;
+    }
+    function detail_(label, value) { const row = document.createElement("div"); const dt = document.createElement("dt"); const dd = document.createElement("dd"); row.className = "pkl-skill-card__detail"; dt.textContent = label; dd.textContent = String(value); row.append(dt, dd); return row; }
+    function badge_(status) { return UI.Badge({label: STATUS[status].label, variant: STATUS[status].variant}); }
+    function requirementsText_(skill, catalog) { if (!skill.requirements.length) return "Nenhum"; const names = Object.create(null); catalog.forEach(item => { names[item.skillId] = item.name; }); return skill.requirements.map(item => `${names[item.requiredSkillId]} ≥ nível ${item.minimumLevel}`).join("; "); }
+    function byId_(catalog, id) { return catalog.find(item => item.skillId === id) || null; }
+    function positive_(value) { const text = String(value).trim(); if (!/^\d+$/.test(text)) return null; const number = Number(text); return Number.isInteger(number) && number >= 1 ? number : null; }
+    function discard_() { return UI.ConfirmDialog({title: "Descartar alterações não salvas?", message: "As alterações feitas neste editor serão perdidas. Deseja continuar?", confirmLabel: "Descartar alterações", danger: true}).open(); }
+
+    function validateCatalog_(catalog) {
+      if (!Array.isArray(catalog)) throw new Error("Catálogo administrativo inválido.");
+      const ids = Object.create(null);
+      catalog.forEach(skill => {
+        if (!skill || typeof skill.skillId !== "string" || typeof skill.apiSkillId !== "string" || typeof skill.name !== "string" || !skill.name.trim() || !Number.isInteger(skill.totalLevels) || skill.totalLevels < 1 || !Array.isArray(skill.buffs) || skill.buffs.length !== skill.totalLevels || !Array.isArray(skill.requirements) || !STATUS[skill.status] || !Number.isInteger(skill.currentLevel) || skill.currentLevel < 0 || typeof skill.createdAt !== "string" || typeof skill.updatedAt !== "string") throw new Error("Habilidade inválida no catálogo administrativo.");
+        if (ids[skill.skillId]) throw new Error("Habilidade duplicada no catálogo administrativo."); ids[skill.skillId] = true;
+        const levels = Object.create(null);
+        skill.buffs.forEach(buff => {
+          if (!buff || typeof buff.skillBuffId !== "string" || !Number.isInteger(buff.level) || buff.level < 1 || buff.level > skill.totalLevels || levels[buff.level] || typeof buff.description !== "string" || !buff.description.trim() || buff.description.length > 500) throw new Error("Buff inválido no catálogo administrativo.");
+          levels[buff.level] = true;
+        });
+      });
+      catalog.forEach(skill => skill.requirements.forEach(requirement => {
+        const required = byId_(catalog, requirement && requirement.requiredSkillId);
+        if (!requirement || typeof requirement.skillRequirementId !== "string" || !required || requirement.requiredSkillId === skill.skillId || !Number.isInteger(requirement.minimumLevel) || requirement.minimumLevel < 1 || requirement.minimumLevel > required.totalLevels) throw new Error("Pré-requisito inválido no catálogo administrativo.");
+      }));
+      return catalog;
+    }
+
+    function handleAuth_(error, options) { if (!error || error.code !== "AUTH_REQUIRED") return false; if (typeof options.onAuthRequired === "function") options.onAuthRequired(); return true; }
+    return {render};
+  })();
+</script>

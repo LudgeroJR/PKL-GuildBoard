@@ -1,0 +1,447 @@
+<script>
+  const PodexView = (() => {
+    const NODE_TYPE_LABEL = Object.freeze({
+      category:    'Categoria',
+      subcategory: 'Subcategoria',
+      rarity:      'Raridade',
+    });
+
+    const SELECTION_STORAGE_KEY_ = 'pkl:podex:selection:v1';
+
+    // =========================================================================
+    // Persistência local da seleção (conveniência — nunca requisito do cálculo)
+    // =========================================================================
+
+    function readStoredSelection_() {
+      try {
+        const raw = window.localStorage.getItem(SELECTION_STORAGE_KEY_);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        if (!parsed || !Array.isArray(parsed.selectedLevelIds)) return [];
+        return parsed.selectedLevelIds;
+      } catch (error) {
+        return [];
+      }
+    }
+
+    function writeStoredSelection_(selectedLevelIds) {
+      try {
+        window.localStorage.setItem(
+          SELECTION_STORAGE_KEY_,
+          JSON.stringify({ selectedLevelIds })
+        );
+      } catch (error) {
+        // Persistência é conveniência; indisponibilidade de storage não pode
+        // quebrar a calculadora.
+      }
+    }
+
+    function render() {
+      const section = document.createElement('section');
+
+      section.className = 'pkl-view pkl-podex-view';
+      section.setAttribute('aria-labelledby', 'pkl-podex-title');
+
+      section.innerHTML = `
+        <h1 id="pkl-podex-title" class="pkl-view__title">Podex</h1>
+
+        <p class="pkl-view__description">
+          Monte sua seleção de categorias, raridades ou níveis do Podex e calcule os materiais necessários.
+        </p>
+      `;
+
+      const content = document.createElement('div');
+      content.className = 'pkl-podex-view__content';
+      content.setAttribute('aria-live', 'polite');
+      content.tabIndex = -1;
+      section.appendChild(content);
+
+      window.queueMicrotask(() => load_(content));
+      return section;
+    }
+
+    async function load_(content, isRetry = false) {
+      if (!content.isConnected) return;
+      content.setAttribute('aria-busy', 'true');
+
+      const status = document.createElement('p');
+      status.className = 'pkl-status';
+      status.setAttribute('role', 'status');
+      status.textContent = 'Carregando o Podex...';
+      content.replaceChildren(status, UI.Skeleton({ lines: 5 }));
+
+      try {
+        const catalog = await ApiClient.requestPublic('podex.getPublicCatalog', {});
+        validateCatalog_(catalog);
+        if (!content.isConnected) return;
+        content.replaceChildren(buildCalculator_(catalog));
+        if (isRetry) content.focus();
+      } catch (error) {
+        if (!content.isConnected) return;
+        const retry = UI.Button({
+          label: 'Tentar novamente',
+          onClick: () => load_(content, true),
+        });
+        content.replaceChildren(UI.EmptyState({
+          title: 'Não foi possível carregar o Podex',
+          description: 'Os dados estão indisponíveis no momento. Tente novamente em instantes.',
+          icon: 'book-open',
+          action: retry,
+        }).element);
+        if (isRetry) retry.focus();
+      } finally {
+        content.removeAttribute('aria-busy');
+      }
+    }
+
+    // =========================================================================
+    // Validação defensiva do DTO público (backend já é autoritativo)
+    // =========================================================================
+
+    function validateCatalog_(catalog) {
+      if (!catalog || !Array.isArray(catalog.categories) || !Array.isArray(catalog.items)) {
+        throw new Error('Catálogo público do Podex inválido.');
+      }
+    }
+
+    // =========================================================================
+    // Calculadora — árvore de seleção + resultado consolidado
+    // =========================================================================
+
+    function buildCalculator_(catalog) {
+      const root = document.createElement('div');
+      root.className = 'pkl-podex-calculator';
+
+      if (catalog.categories.length === 0) {
+        root.appendChild(UI.EmptyState({
+          title: 'Nenhum conteúdo cadastrado no Podex',
+          description: 'A estrutura do Podex ainda não foi configurada pela administração.',
+          icon: 'book-open',
+        }).element);
+        return root;
+      }
+
+      // `ctx` é a única fonte de sincronização visual: qualquer toggle (level ou
+      // pai) chama ctx.refreshAll(), que recomputa checked/indeterminate de todos
+      // os nós a partir de `selectionState` (autoridade real da seleção),
+      // re-renderiza o resultado consolidado e persiste a seleção localmente.
+      // Nenhuma RPC é feita por interação — o catálogo já foi carregado uma
+      // única vez.
+      const storedSelection = readStoredSelection_();
+      const ctx = {
+        selectionState: PodexCalculatorLogic.createPodexSelectionState(catalog, storedSelection),
+        refs: { categories: {}, subcategories: {}, rarities: {}, levels: {} },
+        sortBy: 'name',
+        refreshAll: null,
+        renderResult: null,
+      };
+
+      // IDs obsoletos (fixtures antigas, importações, itens removidos) já são
+      // descartados por `createPodexSelectionState` na carga; o primeiro
+      // `ctx.refreshAll()` (ao final desta função) reescreve o storage com a
+      // seleção sanitizada, mesmo que nada tenha sido alterado pelo usuário.
+
+      ctx.refreshAll = function refreshAll_() {
+        const { selectionState, refs } = ctx;
+
+        Object.keys(refs.categories).forEach(id => {
+          syncCheckbox_(refs.categories[id], selectionState.getCategoryState(id));
+        });
+        Object.keys(refs.subcategories).forEach(id => {
+          syncCheckbox_(refs.subcategories[id], selectionState.getSubcategoryState(id));
+        });
+        Object.keys(refs.rarities).forEach(id => {
+          syncCheckbox_(refs.rarities[id], selectionState.getRarityState(id));
+        });
+        Object.keys(refs.levels).forEach(id => {
+          refs.levels[id].checkbox.checked = selectionState.isLevelSelected(id);
+        });
+
+        if (typeof ctx.renderResult === 'function') ctx.renderResult();
+
+        writeStoredSelection_(selectionState.getSelectedLevelIds());
+      };
+
+      const actions = document.createElement('div');
+      actions.className = 'pkl-podex-calculator__actions';
+      const selectAllBtn = UI.Button({
+        label: 'Selecionar tudo', variant: 'secondary',
+        onClick: () => { ctx.selectionState.selectAll(); ctx.refreshAll(); },
+      });
+      const clearAllBtn = UI.Button({
+        label: 'Limpar seleção', variant: 'ghost',
+        onClick: () => { ctx.selectionState.clearAll(); ctx.refreshAll(); },
+      });
+      actions.append(selectAllBtn, clearAllBtn);
+
+      const tree = document.createElement('ul');
+      tree.className = 'pkl-podex-tree pkl-podex-calculator__tree';
+      tree.setAttribute('aria-label', 'Estrutura do Podex');
+
+      catalog.categories.forEach(category => {
+        tree.appendChild(buildCategoryNode_(category, ctx));
+      });
+
+      const layout = document.createElement('div');
+      layout.className = 'pkl-podex-calculator__layout';
+      const treeCol = document.createElement('div');
+      treeCol.className = 'pkl-podex-calculator__tree-col';
+      treeCol.appendChild(tree);
+      const resultCol = document.createElement('div');
+      resultCol.className = 'pkl-podex-calculator__result-col';
+      resultCol.appendChild(buildResultPanel_(ctx));
+      layout.append(treeCol, resultCol);
+
+      root.append(actions, layout);
+      // Sincroniza checked/indeterminate de todos os pais e renderiza o
+      // resultado a partir da seleção inicial (vazia ou restaurada do storage).
+      ctx.refreshAll();
+      UI.hydrateIcons(root);
+      return root;
+    }
+
+    // =========================================================================
+    // Painel de resultado — consolidação, imagem/fallback e ordenação
+    // =========================================================================
+
+    function buildResultPanel_(ctx) {
+      const section = document.createElement('section');
+      section.className = 'pkl-podex-result';
+      section.setAttribute('aria-label', 'Materiais necessários');
+
+      const header = document.createElement('div');
+      header.className = 'pkl-podex-result__header';
+      const title = document.createElement('h2');
+      title.className = 'pkl-podex-result__title';
+      title.textContent = 'Materiais necessários';
+
+      const sortField = UI.Select({
+        label: 'Ordenar por',
+        value: ctx.sortBy,
+        options: [
+          { value: 'name', label: 'Nome' },
+          { value: 'quantity', label: 'Quantidade' },
+        ],
+      });
+      sortField.select.addEventListener('change', () => {
+        ctx.sortBy = sortField.select.value === 'quantity' ? 'quantity' : 'name';
+        ctx.renderResult();
+      });
+
+      header.append(title, sortField.element);
+
+      const body = document.createElement('div');
+      body.className = 'pkl-podex-result__body';
+
+      ctx.renderResult = function renderResult_() {
+        const selectedLevelIds = ctx.selectionState.getSelectedLevelIds();
+
+        if (selectedLevelIds.length === 0) {
+          body.replaceChildren(UI.EmptyState({
+            title: 'Nenhuma seleção ainda',
+            description: 'Selecione categorias, raridades ou níveis para calcular os materiais.',
+            icon: 'book-open',
+          }).element);
+          return;
+        }
+
+        const aggregated = PodexCalculatorLogic.aggregatePodexRequirements(
+          ctx.selectionState.indexes, selectedLevelIds
+        );
+
+        if (aggregated.length === 0) {
+          body.replaceChildren(UI.EmptyState({
+            title: 'Nenhum material cadastrado',
+            description: 'Os níveis selecionados ainda não possuem requisitos cadastrados.',
+            icon: 'book-open',
+          }).element);
+          return;
+        }
+
+        const sorted = PodexCalculatorLogic.sortPodexCalculatorResults(aggregated, ctx.sortBy);
+        const list = document.createElement('ul');
+        list.className = 'pkl-podex-result__list';
+        sorted.forEach(result => list.appendChild(buildResultRow_(result)));
+        body.replaceChildren(list);
+      };
+
+      section.append(header, body);
+      return section;
+    }
+
+    function buildResultRow_(result) {
+      const li = document.createElement('li');
+      li.className = 'pkl-podex-result__row';
+
+      const media = document.createElement('div');
+      media.className = 'pkl-podex-result__media';
+      media.appendChild(buildResultImage_(result));
+
+      const info = document.createElement('div');
+      info.className = 'pkl-podex-result__info';
+      const name = document.createElement('p');
+      name.className = 'pkl-podex-result__name';
+      name.textContent = result.name;
+      const origin = document.createElement('p');
+      origin.className = 'pkl-podex-result__origin';
+      origin.textContent = result.originType && result.origin
+        ? PodexCalculatorLogic.formatPodexOriginLabel(result)
+        : '';
+      info.append(name, origin);
+
+      const quantity = document.createElement('span');
+      quantity.className = 'pkl-podex-result__quantity';
+      quantity.textContent = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(result.quantity);
+
+      li.append(media, info, quantity);
+      return li;
+    }
+
+    function buildResultImage_(result) {
+      if (!result.imageUrl) return buildResultFallback_();
+
+      const img = document.createElement('img');
+      img.className = 'pkl-podex-result__image';
+      img.src = result.imageUrl;
+      img.alt = '';
+      img.loading = 'lazy';
+      img.addEventListener('error', () => {
+        img.replaceWith(buildResultFallback_());
+      }, { once: true });
+      return img;
+    }
+
+    function buildResultFallback_() {
+      const fallback = document.createElement('div');
+      fallback.className = 'pkl-podex-result__fallback';
+      fallback.setAttribute('aria-hidden', 'true');
+      fallback.appendChild(UI.icon('camera'));
+      return fallback;
+    }
+
+    function syncCheckbox_(ref, state) {
+      ref.checkbox.checked = state === 'checked';
+      ref.setIndeterminate(state === 'indeterminate');
+    }
+
+    function buildCategoryNode_(category, ctx) {
+      const children = document.createElement('ul');
+      children.className = 'pkl-podex-tree__children';
+      category.subcategories.forEach(subcategory => {
+        children.appendChild(buildSubcategoryNode_(subcategory, ctx));
+      });
+
+      return buildParentNode_({
+        type: 'category',
+        id: category.categoryId,
+        name: category.name,
+        children,
+        onToggle: () => ctx.selectionState.toggleCategory(category.categoryId),
+        refBucket: ctx.refs.categories,
+        ctx,
+      });
+    }
+
+    function buildSubcategoryNode_(subcategory, ctx) {
+      const children = document.createElement('ul');
+      children.className = 'pkl-podex-tree__children';
+      subcategory.rarities.forEach(rarity => {
+        children.appendChild(buildRarityNode_(rarity, ctx));
+      });
+
+      return buildParentNode_({
+        type: 'subcategory',
+        id: subcategory.subcategoryId,
+        name: subcategory.name,
+        children,
+        onToggle: () => ctx.selectionState.toggleSubcategory(subcategory.subcategoryId),
+        refBucket: ctx.refs.subcategories,
+        ctx,
+      });
+    }
+
+    function buildRarityNode_(rarity, ctx) {
+      const children = document.createElement('ul');
+      children.className = 'pkl-podex-tree__children';
+      rarity.levels.forEach(level => {
+        children.appendChild(buildLevelNode_(level, ctx));
+      });
+
+      return buildParentNode_({
+        type: 'rarity',
+        id: rarity.rarityId,
+        name: rarity.name,
+        children,
+        onToggle: () => ctx.selectionState.toggleRarity(rarity.rarityId),
+        refBucket: ctx.refs.rarities,
+        ctx,
+      });
+    }
+
+    function buildLevelNode_(level, ctx) {
+      const li = document.createElement('li');
+      li.className = 'pkl-podex-tree__item pkl-podex-tree__item--level';
+
+      const row = document.createElement('div');
+      row.className = 'pkl-podex-tree__row';
+
+      const checkboxRef = UI.Checkbox({
+        label: `Nível ${level.level}`,
+        checked: ctx.selectionState.isLevelSelected(level.podexLevelId),
+      });
+      checkboxRef.checkbox.addEventListener('change', () => {
+        ctx.selectionState.toggleLevel(level.podexLevelId);
+        ctx.refreshAll();
+      });
+
+      row.appendChild(checkboxRef.element);
+      li.appendChild(row);
+
+      ctx.refs.levels[level.podexLevelId] = checkboxRef;
+      return li;
+    }
+
+    function buildParentNode_({ type, id, name, children, onToggle, refBucket, ctx }) {
+      const li = document.createElement('li');
+      li.className = `pkl-podex-tree__item pkl-podex-tree__item--${type}`;
+
+      const row = document.createElement('div');
+      row.className = 'pkl-podex-tree__row';
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'pkl-podex-calc-toggle';
+      toggleBtn.setAttribute('aria-expanded', 'false');
+      toggleBtn.setAttribute('aria-label', `Expandir ${NODE_TYPE_LABEL[type]} ${name}`);
+      toggleBtn.classList.add('is-collapsed');
+      toggleBtn.appendChild(UI.icon('chevron-down', { className: 'pkl-podex-calc-toggle__icon' }));
+      children.hidden = true;
+
+      toggleBtn.addEventListener('click', () => {
+        const expanded = toggleBtn.getAttribute('aria-expanded') === 'true';
+        children.hidden = expanded;
+        toggleBtn.setAttribute('aria-expanded', String(!expanded));
+        toggleBtn.setAttribute('aria-label', `${expanded ? 'Expandir' : 'Recolher'} ${NODE_TYPE_LABEL[type]} ${name}`);
+        toggleBtn.classList.toggle('is-collapsed', expanded);
+      });
+
+      const checkboxRef = UI.Checkbox({ label: name });
+      checkboxRef.checkbox.addEventListener('change', () => {
+        onToggle();
+        ctx.refreshAll();
+      });
+
+      const badge = UI.Badge({ label: NODE_TYPE_LABEL[type], variant: 'neutral' });
+
+      row.append(toggleBtn, checkboxRef.element, badge);
+      li.append(row, children);
+
+      refBucket[id] = checkboxRef;
+      return li;
+    }
+
+    return {
+      render
+    };
+  })();
+</script>

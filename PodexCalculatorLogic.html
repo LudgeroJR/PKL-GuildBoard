@@ -1,0 +1,250 @@
+<script>
+  const PodexCalculatorLogic = (() => {
+    // ------------------------------------------------------------
+    // Índices em memória (evita traversal repetitivo por clique)
+    // ------------------------------------------------------------
+
+    function buildPodexCalculatorIndexes(catalog) {
+      const levelsById = Object.create(null);
+      const itemsById = Object.create(null);
+      const descendantLevelIdsByRarity = Object.create(null);
+      const descendantLevelIdsBySubcategory = Object.create(null);
+      const descendantLevelIdsByCategory = Object.create(null);
+
+      (catalog.items || []).forEach(item => { itemsById[item.itemId] = item; });
+
+      (catalog.categories || []).forEach(category => {
+        const categoryLevelIds = [];
+
+        (category.subcategories || []).forEach(subcategory => {
+          const subcategoryLevelIds = [];
+
+          (subcategory.rarities || []).forEach(rarity => {
+            const rarityLevelIds = (rarity.levels || []).map(level => level.podexLevelId);
+
+            (rarity.levels || []).forEach(level => { levelsById[level.podexLevelId] = level; });
+
+            descendantLevelIdsByRarity[rarity.rarityId] = rarityLevelIds;
+            subcategoryLevelIds.push(...rarityLevelIds);
+          });
+
+          descendantLevelIdsBySubcategory[subcategory.subcategoryId] = subcategoryLevelIds;
+          categoryLevelIds.push(...subcategoryLevelIds);
+        });
+
+        descendantLevelIdsByCategory[category.categoryId] = categoryLevelIds;
+      });
+
+      return {
+        levelsById,
+        itemsById,
+        descendantLevelIdsByRarity,
+        descendantLevelIdsBySubcategory,
+        descendantLevelIdsByCategory,
+      };
+    }
+
+    // ------------------------------------------------------------
+    // Estado de seleção de um nó pai (checkbox tri-state)
+    // ------------------------------------------------------------
+
+    function computePodexSelectionState(descendantLevelIds, selectedLevelIds) {
+      if (!Array.isArray(descendantLevelIds) || descendantLevelIds.length === 0) return 'unchecked';
+
+      let selectedCount = 0;
+      descendantLevelIds.forEach(id => { if (selectedLevelIds.has(id)) selectedCount += 1; });
+
+      if (selectedCount === 0) return 'unchecked';
+      if (selectedCount === descendantLevelIds.length) return 'checked';
+      return 'indeterminate';
+    }
+
+    // ------------------------------------------------------------
+    // Toggle de um grupo (Category/Subcategory/Rarity) ou de um Level
+    // ------------------------------------------------------------
+
+    function togglePodexSelectionGroup(selectedLevelIds, descendantLevelIds, forceSelect) {
+      const next = new Set(selectedLevelIds);
+      const state = computePodexSelectionState(descendantLevelIds, selectedLevelIds);
+      const shouldSelect = typeof forceSelect === 'boolean' ? forceSelect : state !== 'checked';
+
+      descendantLevelIds.forEach(id => {
+        if (shouldSelect) next.add(id); else next.delete(id);
+      });
+
+      return next;
+    }
+
+    // ------------------------------------------------------------
+    // Agregação de requirements dos levels selecionados
+    // ------------------------------------------------------------
+
+    function aggregatePodexRequirements(indexes, selectedLevelIds) {
+      const totalsByItemId = Object.create(null);
+
+      selectedLevelIds.forEach(levelId => {
+        const level = indexes.levelsById[levelId];
+        if (!level) return;
+
+        (level.requirements || []).forEach(req => {
+          const current = totalsByItemId[req.itemId] || 0;
+          const next = current + req.quantity;
+
+          if (!Number.isSafeInteger(next)) {
+            throw new Error('Quantidade agregada excede o limite seguro de inteiro.');
+          }
+
+          totalsByItemId[req.itemId] = next;
+        });
+      });
+
+      return Object.keys(totalsByItemId).map(itemId => {
+        const item = indexes.itemsById[itemId] || null;
+
+        return {
+          itemId,
+          name:       item ? item.name : itemId,
+          originType: item ? item.originType : null,
+          origin:     item ? item.origin : null,
+          imageUrl:   item ? item.imageUrl : null,
+          quantity:   totalsByItemId[itemId],
+        };
+      });
+    }
+
+    // ------------------------------------------------------------
+    // Ordenação do resultado
+    // ------------------------------------------------------------
+
+    function sortPodexCalculatorResults(results, sortBy) {
+      const sorted = results.slice();
+
+      if (sortBy === 'quantity') {
+        sorted.sort((a, b) => {
+          if (b.quantity !== a.quantity) return b.quantity - a.quantity;
+          return String(a.name).localeCompare(String(b.name), 'pt-BR');
+        });
+        return sorted;
+      }
+
+      sorted.sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'));
+      return sorted;
+    }
+
+    // ------------------------------------------------------------
+    // Label de origem (pt-BR) — reutilizável, sem novos enums de procedência
+    // ------------------------------------------------------------
+
+    function formatPodexOriginLabel(item) {
+      if (item.originType === 'POKEMON') return `Pokémon: ${item.origin}`;
+      if (item.originType === 'TYPE') return `Tipagem: ${item.origin}`;
+      return `Origem: ${item.origin}`;
+    }
+
+    // ------------------------------------------------------------
+    // Sanitização de seleção persistida (descarta IDs obsoletos)
+    // ------------------------------------------------------------
+
+    function sanitizeStoredPodexSelection(storedLevelIds, validLevelIdsSet) {
+      if (!Array.isArray(storedLevelIds)) return [];
+
+      const seen = new Set();
+      const result = [];
+
+      storedLevelIds.forEach(id => {
+        if (typeof id === 'string' && validLevelIdsSet.has(id) && !seen.has(id)) {
+          seen.add(id);
+          result.push(id);
+        }
+      });
+
+      return result;
+    }
+
+    // ------------------------------------------------------------
+    // Estado de seleção hierárquica (harness — sem UI)
+    // Autoridade de seleção: Set<podexLevelId>. Estados de
+    // Category/Subcategory/Rarity são sempre derivados dos levels.
+    // ------------------------------------------------------------
+
+    function createPodexSelectionState(catalog, initialSelectedLevelIds) {
+      const indexes = buildPodexCalculatorIndexes(catalog);
+      const allLevelIds = Object.keys(indexes.levelsById);
+      const validLevelIdsSet = new Set(allLevelIds);
+
+      let selected = new Set(
+        sanitizeStoredPodexSelection(initialSelectedLevelIds || [], validLevelIdsSet)
+      );
+
+      function toggleDescendants_(descendantLevelIds, forceSelect) {
+        selected = togglePodexSelectionGroup(selected, descendantLevelIds || [], forceSelect);
+      }
+
+      function toggleLevel(levelId, forceSelect) {
+        if (!validLevelIdsSet.has(levelId)) return;
+
+        const shouldSelect = typeof forceSelect === 'boolean' ? forceSelect : !selected.has(levelId);
+        const next = new Set(selected);
+
+        if (shouldSelect) next.add(levelId); else next.delete(levelId);
+        selected = next;
+      }
+
+      function toggleCategory(categoryId, forceSelect) {
+        toggleDescendants_(indexes.descendantLevelIdsByCategory[categoryId], forceSelect);
+      }
+
+      function toggleSubcategory(subcategoryId, forceSelect) {
+        toggleDescendants_(indexes.descendantLevelIdsBySubcategory[subcategoryId], forceSelect);
+      }
+
+      function toggleRarity(rarityId, forceSelect) {
+        toggleDescendants_(indexes.descendantLevelIdsByRarity[rarityId], forceSelect);
+      }
+
+      function selectAll() { selected = new Set(allLevelIds); }
+      function clearAll() { selected = new Set(); }
+
+      function getCategoryState(categoryId) {
+        return computePodexSelectionState(indexes.descendantLevelIdsByCategory[categoryId] || [], selected);
+      }
+
+      function getSubcategoryState(subcategoryId) {
+        return computePodexSelectionState(indexes.descendantLevelIdsBySubcategory[subcategoryId] || [], selected);
+      }
+
+      function getRarityState(rarityId) {
+        return computePodexSelectionState(indexes.descendantLevelIdsByRarity[rarityId] || [], selected);
+      }
+
+      function isLevelSelected(levelId) { return selected.has(levelId); }
+      function getSelectedLevelIds() { return Array.from(selected); }
+
+      return {
+        indexes,
+        toggleLevel,
+        toggleCategory,
+        toggleSubcategory,
+        toggleRarity,
+        selectAll,
+        clearAll,
+        getCategoryState,
+        getSubcategoryState,
+        getRarityState,
+        isLevelSelected,
+        getSelectedLevelIds,
+      };
+    }
+
+    return {
+      buildPodexCalculatorIndexes,
+      computePodexSelectionState,
+      togglePodexSelectionGroup,
+      aggregatePodexRequirements,
+      sortPodexCalculatorResults,
+      formatPodexOriginLabel,
+      sanitizeStoredPodexSelection,
+      createPodexSelectionState,
+    };
+  })();
+</script>

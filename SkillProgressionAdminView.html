@@ -1,0 +1,291 @@
+<script>
+  const SkillProgressionAdminView = (() => {
+    const viewOptions = new WeakMap();
+
+    function refresh(root) {
+      if (!root || !root.isConnected || !viewOptions.has(root) ||
+          root.dataset.mutationPending === 'true' || root.getAttribute('aria-busy') === 'true') return;
+      return load_(root, viewOptions.get(root));
+    }
+    const STATUS = Object.freeze({
+      LOCKED: {label: "Bloqueada", variant: "danger"},
+      AVAILABLE: {label: "Disponível", variant: "info"},
+      IN_PROGRESS: {label: "Em progresso", variant: "info"},
+      AWAITING_LEVEL_CONFIG: {
+        label: "Sem etapas na API",
+        variant: "warning",
+      },
+      COMPLETED: {label: "Concluída", variant: "success"},
+    });
+
+    function render(options = {}) {
+      const root = document.createElement("section");
+      root.className = "pkl-skill-progression";
+      root.setAttribute("aria-label", "Progressão das habilidades");
+      viewOptions.set(root, options);
+      window.queueMicrotask(() => load_(root, options));
+      return root;
+    }
+
+    async function load_(root, options, focusSkillId = null) {
+      if (!root.isConnected) return;
+      root.setAttribute("aria-busy", "true");
+      const loading = document.createElement("div");
+      const status = document.createElement("p");
+      loading.className = "pkl-skill-progression__loading";
+      status.className = "pkl-status";
+      status.setAttribute("role", "status");
+      status.textContent = "Carregando progressão das habilidades...";
+      loading.append(status, UI.Skeleton({lines: 5}));
+      root.replaceChildren(loading);
+
+      try {
+        const data = await ApiClient.request("skills.getAdminProgression", {});
+        if (!root.isConnected) return;
+        validateProgression_(data);
+        renderProgression_(root, data, options);
+        if (focusSkillId) {
+          window.queueMicrotask(() => {
+            const target = root.querySelector(
+              `[data-progression-skill-id="${focusSkillId}"]`,
+            );
+            if (target instanceof HTMLElement) target.focus();
+          });
+        }
+      } catch (error) {
+        if (!root.isConnected || handleAuth_(error, options)) return;
+        const retry = UI.Button({
+          label: "Tentar novamente",
+          variant: "secondary",
+          onClick: () => load_(root, options),
+        });
+        const empty = UI.EmptyState({
+          title: "Não foi possível carregar a progressão",
+          description:
+            error && error.code === "CONFLICT"
+              ? error.message
+              : "Tente novamente para consultar o estado atual.",
+          action: retry,
+        });
+        empty.element.setAttribute("role", "alert");
+        root.replaceChildren(empty.element);
+        retry.focus();
+      } finally {
+        root.removeAttribute("aria-busy");
+      }
+    }
+
+    function renderProgression_(root, data, options) {
+      const header = document.createElement("div");
+      const heading = document.createElement("div");
+      const refresh = UI.Button({
+        label: "Atualizar",
+        variant: "secondary",
+        onClick: () => load_(root, options),
+      });
+      const guild = document.createElement("div");
+      const list = document.createElement("div");
+
+      header.className = "pkl-skill-progression__header";
+      heading.innerHTML =
+        '<h3 class="pkl-skill-progression__title">Progressão</h3>' +
+        '<p class="pkl-skill-progression__description">Níveis e steps vêm da API da Guild. Atualize para consultar o último snapshot sincronizado.</p>';
+      header.append(heading, refresh);
+
+      guild.className = "pkl-skill-progression__guild";
+      if (data.guild.initialized) {
+        guild.append(
+          UI.StatCard({
+            label: "Guild Bank",
+            value: UtilitiesClient.formatGameMoney(data.guild.bankBalance),
+            supportingText: "Saldo informado pela API da Guild.",
+          }).element,
+        );
+      } else {
+        const warning = document.createElement("p");
+        warning.className = "pkl-skill-progression__warning";
+        warning.setAttribute("role", "status");
+        warning.textContent =
+          "A Guild ainda não foi sincronizada com a API.";
+        guild.append(warning);
+      }
+
+      list.className = "pkl-skill-progression__grid";
+      if (data.skills.length === 0) {
+        list.append(
+          UI.EmptyState({
+            title: "Nenhuma habilidade cadastrada",
+            description:
+              "Aguarde a sincronização do catálogo de habilidades.",
+          }).element,
+        );
+      } else {
+        data.skills.forEach((skill) => {
+          list.append(buildSkillCard_(root, data, skill, options));
+        });
+      }
+
+      root.replaceChildren(header, guild, list);
+    }
+
+    function buildSkillCard_(root, data, skill, options) {
+      const card = document.createElement("article");
+      const header = document.createElement("div");
+      const name = document.createElement("h4");
+      const summary = document.createElement("dl");
+      const body = document.createElement("div");
+
+      card.className = "pkl-skill-progress-card";
+      card.dataset.progressionSkillId = skill.skillId;
+      card.tabIndex = -1;
+      header.className = "pkl-skill-progress-card__header";
+      name.className = "pkl-skill-progress-card__name";
+      name.textContent = skill.name;
+      header.append(name, UI.Badge(STATUS[skill.status]));
+
+      summary.className = "pkl-skill-progress-card__summary";
+      summary.append(
+        detail_("Nível", `${skill.currentLevel} / ${skill.totalLevels}`),
+      );
+
+      body.className = "pkl-skill-progress-card__body";
+      if (skill.status === "IN_PROGRESS") {
+        body.append(
+          UI.Progress({
+            label: `Steps: ${skill.currentStep} de ${skill.totalSteps}`,
+            value: skill.currentStep,
+            max: skill.totalSteps,
+          }).element,
+        );
+      }
+      body.append(nextBuff_(skill), requirements_(skill));
+
+      card.append(header, summary, body);
+      return card;
+    }
+
+    function nextBuff_(skill) {
+      const section = document.createElement("div");
+      const label = document.createElement("span");
+      const value = document.createElement("p");
+      section.className = "pkl-skill-progress-card__info";
+      label.className = "pkl-skill-progress-card__label";
+      label.textContent = skill.nextBuff ? `Próximo buff — nível ${skill.nextBuff.level}` : "Buffs";
+      value.textContent = skill.nextBuff
+        ? skill.nextBuff.description
+        : "Todos os níveis foram concluídos.";
+      section.append(label, value);
+      return section;
+    }
+
+    function requirements_(skill) {
+      const section = document.createElement("div");
+      const label = document.createElement("span");
+      const list = document.createElement("ul");
+      section.className = "pkl-skill-progress-card__info";
+      label.className = "pkl-skill-progress-card__label";
+      label.textContent = "Pré-requisitos";
+      list.className = "pkl-skill-progress-card__requirements";
+
+      if (skill.requirements.length === 0) {
+        const item = document.createElement("li");
+        item.textContent = "Nenhum pré-requisito.";
+        list.append(item);
+      } else {
+        skill.requirements.forEach((requirement) => {
+          const item = document.createElement("li");
+          item.className = requirement.satisfied ? "is-satisfied" : "is-pending";
+          item.textContent =
+            `${requirement.requiredSkillName}: nível ${requirement.currentLevel} / ` +
+            `${requirement.minimumLevel} — ${requirement.satisfied ? "Atendido" : "Pendente"}`;
+          list.append(item);
+        });
+      }
+
+      section.append(label, list);
+      return section;
+    }
+
+    function detail_(labelText, valueText) {
+      const row = document.createElement("div");
+      const label = document.createElement("dt");
+      const value = document.createElement("dd");
+      row.className = "pkl-skill-progress-card__detail";
+      label.textContent = labelText;
+      value.textContent = valueText;
+      row.append(label, value);
+      return row;
+    }
+
+    function validateProgression_(data) {
+      if (
+        !data || typeof data !== "object" || Array.isArray(data) ||
+        !data.guild || typeof data.guild.initialized !== "boolean" ||
+        !Array.isArray(data.skills)
+      ) {
+        throw new Error("Progressão administrativa inválida.");
+      }
+      if (
+        data.guild.initialized
+          ? !Number.isSafeInteger(data.guild.bankBalance) || data.guild.bankBalance < 0
+          : data.guild.bankBalance !== null
+      ) {
+        throw new Error("Guild Bank inválido na progressão.");
+      }
+
+      const ids = Object.create(null);
+      data.skills.forEach((skill) => {
+        if (
+          !skill || typeof skill.skillId !== "string" || ids[skill.skillId] ||
+          typeof skill.name !== "string" || !skill.name.trim() ||
+          !Number.isSafeInteger(skill.totalLevels) || skill.totalLevels < 1 ||
+          !STATUS[skill.status] || !Number.isSafeInteger(skill.currentLevel) ||
+          skill.currentLevel < 0 || !Array.isArray(skill.requirements)
+        ) {
+          throw new Error("Habilidade inválida na progressão administrativa.");
+        }
+        ids[skill.skillId] = true;
+        if (skill.status === "IN_PROGRESS") {
+          if (
+            !Number.isSafeInteger(skill.currentStep) || skill.currentStep < 0 ||
+            !Number.isSafeInteger(skill.totalSteps) || skill.totalSteps < 1 ||
+            skill.currentStep >= skill.totalSteps
+          ) {
+            throw new Error("Estado IN_PROGRESS inválido na progressão.");
+          }
+        } else if (
+          (skill.status === "LOCKED" || skill.status === "AVAILABLE") &&
+          (skill.currentLevel !== 0 || skill.currentStep !== null ||
+            skill.totalSteps !== null)
+        ) {
+          throw new Error("Estado calculado inválido na progressão.");
+        } else if (
+          (skill.status === "AWAITING_LEVEL_CONFIG" || skill.status === "COMPLETED") &&
+          (skill.currentStep !== 0 || skill.totalSteps !== null)
+        ) {
+          throw new Error("Estado persistido inválido na progressão.");
+        }
+        skill.requirements.forEach((requirement) => {
+          if (
+            !requirement || typeof requirement.requiredSkillId !== "string" ||
+            typeof requirement.requiredSkillName !== "string" ||
+            !Number.isSafeInteger(requirement.minimumLevel) || requirement.minimumLevel < 1 ||
+            !Number.isSafeInteger(requirement.currentLevel) || requirement.currentLevel < 0 ||
+            typeof requirement.satisfied !== "boolean"
+          ) {
+            throw new Error("Pré-requisito inválido na progressão.");
+          }
+        });
+      });
+      return data;
+    }
+
+    function handleAuth_(error, options) {
+      if (!error || error.code !== "AUTH_REQUIRED") return false;
+      if (typeof options.onAuthRequired === "function") options.onAuthRequired();
+      return true;
+    }
+
+    return {render, refresh};
+  })();
+</script>

@@ -1,0 +1,568 @@
+<script>
+  const GuildAdminView = (() => {
+    const refreshers = new WeakMap();
+
+    function refresh(root) {
+      if (root && root.isConnected && refreshers.has(root)) refreshers.get(root)();
+    }
+
+    function render(options = {}) {
+      const root = document.createElement('section');
+      root.className = 'pkl-guild-admin';
+      root.setAttribute('aria-label', 'Gestão da Guild');
+      refreshers.set(root, () => {
+        if (root.getAttribute('aria-busy') !== 'true') load_(root, options);
+      });
+
+      // Aguarda a inserção no shell para descartar respostas de telas removidas.
+      window.queueMicrotask(() => load_(root, options));
+      return root;
+    }
+
+    async function load_(root, options) {
+      if (!root.isConnected) return;
+      root.setAttribute('aria-busy', 'true');
+      const status = document.createElement('p');
+      status.className = 'pkl-status';
+      status.setAttribute('role', 'status');
+      status.textContent = 'Carregando estado da Guild...';
+      root.replaceChildren(status, UI.Skeleton({lines: 3}));
+
+      try {
+        const state = await ApiClient.request('guild.getAdminState', {});
+        if (!root.isConnected) return;
+        validateState_(state);
+        renderForm_(root, state, null, options);
+      } catch (error) {
+        if (!root.isConnected) return;
+        if (handleAuth_(error, options)) return;
+        const retry = UI.Button({label: 'Tentar novamente', onClick: () => load_(root, options)});
+        root.replaceChildren(UI.EmptyState({
+          title: 'Não foi possível carregar a Guild',
+          description: error && error.code === 'CONFLICT'
+            ? error.message : 'Tente novamente para consultar os dados atuais.',
+          action: retry,
+        }).element);
+        root.firstChild.setAttribute('role', 'alert');
+        retry.focus();
+      } finally {
+        root.removeAttribute('aria-busy');
+      }
+    }
+
+    function renderForm_(root, initialState, initialObjective, options) {
+      let baseline = initialState;
+      let syncing = false;
+      let objectiveController = null;
+      const notice = document.createElement('p');
+      notice.className = 'pkl-view__notice';
+      notice.textContent = 'A Guild ainda não foi sincronizada com a API. Aguarde o próximo ciclo de sincronização.';
+      notice.hidden = baseline.initialized;
+      const stats = document.createElement('div');
+      stats.className = 'pkl-guild-admin__fields';
+      const errorStatus = document.createElement('p');
+      errorStatus.className = 'pkl-status pkl-status--error';
+      errorStatus.setAttribute('role', 'alert');
+      errorStatus.hidden = true;
+      const updatedStatus = document.createElement('p');
+      updatedStatus.className = 'pkl-guild-admin__status';
+      updatedStatus.setAttribute('role', 'status');
+      const syncStatus = document.createElement('p');
+      syncStatus.className = 'pkl-guild-admin__status';
+      syncStatus.setAttribute('role', 'status');
+      syncStatus.hidden = true;
+      const lastSync = document.createElement('p');
+      lastSync.className = 'pkl-guild-admin__status';
+      lastSync.setAttribute('role', 'status');
+      lastSync.textContent = 'Consultando última sincronização...';
+      const reloadButton = UI.Button({label: 'Atualizar dados da Guild', variant: 'secondary', onClick: sync_});
+      const syncNowButton = UI.Button({label: 'Sincronizar agora', variant: 'primary', onClick: syncNow_});
+      const body = document.createElement('div');
+      body.append(notice, stats, updatedStatus, lastSync, errorStatus, syncStatus, reloadButton, syncNowButton);
+      const stateCard = UI.Card({title: 'Estado da Guild',
+        description: 'Dados sincronizados automaticamente a partir da API da guild.',
+        body}).element;
+      const objectiveHost = document.createElement('section');
+      objectiveHost.className = 'pkl-guild-objective-admin-host';
+      objectiveHost.setAttribute('aria-label', 'Administração do objetivo atual');
+      root.replaceChildren(stateCard, objectiveHost);
+      objectiveController = renderObjectiveAdmin_(
+        objectiveHost,
+        initialObjective,
+        options,
+      );
+
+      function renderStats_() {
+        notice.hidden = baseline.initialized;
+        stats.replaceChildren();
+        if (!baseline.initialized) {
+          updatedStatus.textContent = '';
+          return;
+        }
+        [
+          ['Nível da Guild', String(baseline.level)],
+          ['Guild Bank', UtilitiesClient.formatGameMoney(baseline.bankBalance)],
+          ['XP Total', String(baseline.xpTotal)],
+          ['XP p/ próximo nível', String(baseline.xpProximoNivel)],
+          ['Vagas', String(baseline.vagas)],
+          ['Ranking hoje', String(baseline.rankingHoje)],
+          ['Ranking ontem', String(baseline.rankingOntem)],
+        ].forEach(([label, value]) => stats.appendChild(UI.StatCard({label, value}).element));
+        updatedStatus.textContent = 'Atualizado em ' + new Date(baseline.updatedAt).toLocaleString('pt-BR') + '.';
+      }
+
+      async function loadSyncResult_() {
+        try {
+          const result = await ApiClient.request('guild.getSyncStatus', {});
+          if (!root.isConnected) return;
+          if (result === null) {
+            lastSync.textContent = 'Nenhuma sincronização registrada.';
+            return;
+          }
+          const when = new Date(result.checkedAt).toLocaleString('pt-BR');
+          const core = result.core.ok ? 'núcleo concluído' : `núcleo falhou: ${result.core.reason}`;
+          const daily = result.daily.ok ? 'diário concluído' : `diário falhou: ${result.daily.reason}`;
+          lastSync.textContent = `Última sincronização (${when}): ${core}; ${daily}.`;
+        } catch (error) {
+          if (!root.isConnected || handleAuth_(error, options)) return;
+          lastSync.textContent = 'Resultado da última sincronização indisponível.';
+        }
+      }
+
+      async function sync_() {
+        if (syncing || !root.isConnected) return;
+        syncing = true;
+        reloadButton.disabled = true;
+        syncNowButton.disabled = true;
+        errorStatus.hidden = true;
+        syncStatus.hidden = true;
+        try {
+          const state = await ApiClient.request('guild.getAdminState', {});
+          if (!root.isConnected) return;
+          validateState_(state);
+          baseline = state;
+          renderStats_();
+          loadSyncResult_();
+        } catch (error) {
+          if (!root.isConnected || handleAuth_(error, options)) return;
+          errorStatus.textContent = error && error.code === 'CONFLICT'
+            ? error.message : 'Não foi possível atualizar a Guild. Tente novamente.';
+          errorStatus.hidden = false;
+        } finally {
+          syncing = false;
+          if (root.isConnected) {
+            reloadButton.disabled = false;
+            syncNowButton.disabled = false;
+          }
+        }
+      }
+      async function syncNow_() {
+        if (syncing || !root.isConnected) return;
+        syncing = true;
+        syncNowButton.disabled = true;
+        reloadButton.disabled = true;
+        syncStatus.className = 'pkl-guild-admin__status';
+        syncStatus.setAttribute('role', 'status');
+        syncStatus.textContent = 'Sincronizando com a API da guild...';
+        syncStatus.hidden = false;
+        errorStatus.hidden = true;
+        let syncDone = false;
+        try {
+          const outcome = await ApiClient.request('guild.syncNow', {});
+          if (!root.isConnected) return;
+          syncStatus.textContent = outcome.daily && outcome.daily.ok
+            ? 'Núcleo e tasks diárias sincronizados.'
+            : `Núcleo sincronizado; tasks diárias falharam: ${outcome.daily && outcome.daily.reason || 'erro desconhecido'}.`;
+          syncDone = true;
+          const state = await ApiClient.request('guild.getAdminState', {});
+          if (!root.isConnected) return;
+          validateState_(state);
+          baseline = state;
+          renderStats_();
+        } catch (error) {
+          if (!root.isConnected || handleAuth_(error, options)) return;
+          if (syncDone) {
+            // Sync succeeded; only the subsequent state reload failed.
+            errorStatus.textContent = 'Dados da Guild não puderam ser atualizados. Tente atualizar manualmente.';
+          } else {
+            syncStatus.hidden = true;
+            errorStatus.textContent = error && error.message
+              ? error.message : 'Não foi possível sincronizar com a API da guild.';
+          }
+          errorStatus.hidden = false;
+        } finally {
+          if (root.isConnected) loadSyncResult_();
+          syncing = false;
+          if (root.isConnected) {
+            syncNowButton.disabled = false;
+            reloadButton.disabled = false;
+          }
+        }
+      }
+
+      refreshers.set(root, () => {
+        sync_();
+        objectiveController.refresh();
+      });
+
+      renderStats_();
+      loadSyncResult_();
+    }
+
+    function renderObjectiveAdmin_(host, initialData, options) {
+      let data = initialData;
+      let loading = false;
+
+      function render_() {
+        if (!host.isConnected) return;
+
+        if (data === null) {
+          const loadingStatus = document.createElement('p');
+          loadingStatus.className = 'pkl-status';
+          loadingStatus.setAttribute('role', 'status');
+          loadingStatus.textContent = 'Carregando objetivo atual...';
+          host.replaceChildren(UI.Card({
+            title: 'Objetivo atual',
+            description: 'Escolha uma habilidade em progresso para concluir o nível atual inteiro.',
+            body: [loadingStatus, UI.Skeleton({lines: 4})],
+          }).element);
+          return;
+        }
+
+        const body = document.createElement('div');
+        body.className = 'pkl-guild-objective-admin';
+        const liveStatus = document.createElement('p');
+        liveStatus.className = 'pkl-status';
+        liveStatus.setAttribute('role', 'status');
+        liveStatus.setAttribute('aria-live', 'polite');
+        liveStatus.hidden = true;
+
+        if (!data.initialized) {
+          body.appendChild(UI.EmptyState({
+            title: 'Aguarde a sincronização da Guild',
+            description: 'O estado da Guild precisa estar disponível antes de escolher um objetivo.',
+          }).element);
+          host.replaceChildren(UI.Card({
+            title: 'Objetivo atual',
+            description: 'Escolha uma habilidade em progresso para concluir o nível atual inteiro.',
+            body,
+          }).element);
+          return;
+        }
+
+        if (data.objectiveError) {
+          const warning = document.createElement('p');
+          warning.className = 'pkl-view__notice pkl-guild-objective-admin__error';
+          warning.setAttribute('role', 'alert');
+          warning.textContent = data.objectiveError.message;
+          body.appendChild(warning);
+        }
+
+        if (data.objective) {
+          body.appendChild(buildObjectiveSummary_(data.objective));
+        } else if (!data.objectiveError) {
+          body.appendChild(UI.EmptyState({
+            title: 'Nenhum objetivo definido',
+            description: 'Selecione abaixo uma habilidade elegível para orientar a arrecadação da Guild.',
+          }).element);
+        }
+
+        const controls = document.createElement('div');
+        controls.className = 'pkl-guild-objective-admin__controls';
+        const selectedId = data.objective ? data.objective.skillId : '';
+        const selector = UI.Select({
+          label: 'Habilidade objetivo',
+          name: 'guildObjectiveSkillId',
+          placeholder: data.candidatesAvailable
+            ? 'Selecione uma habilidade'
+            : 'Habilidades indisponíveis',
+          value: selectedId,
+          disabled: !data.candidatesAvailable || data.candidates.length === 0,
+          helperText: data.candidatesAvailable
+            ? 'Somente habilidades com nível em progresso podem ser selecionadas.'
+            : 'Os dados de habilidades precisam ser revisados antes de uma nova seleção.',
+          options: data.candidates.map(candidate => ({
+            value: candidate.skillId,
+            label: `${candidate.name} — nível ${candidate.currentLevel} → ${candidate.targetLevel}`,
+          })),
+        });
+        const actions = document.createElement('div');
+        actions.className = 'pkl-guild-objective-admin__actions';
+        const saveButton = UI.Button({
+          label: data.objective ? 'Trocar objetivo' : 'Definir objetivo',
+        });
+        const clearButton = UI.Button({
+          label: 'Remover objetivo',
+          variant: 'danger',
+        });
+        clearButton.hidden = !data.canClearObjective;
+
+        function refreshControls_() {
+          const value = selector.select.value;
+          saveButton.disabled = loading || value === '' || value === selectedId;
+          clearButton.disabled = loading;
+          selector.select.disabled = loading ||
+            !data.candidatesAvailable || data.candidates.length === 0;
+        }
+
+        selector.select.addEventListener('change', () => {
+          selector.setError(null);
+          refreshControls_();
+        });
+
+        saveButton.addEventListener('click', async () => {
+          const skillId = selector.select.value;
+          if (!skillId || loading) return;
+          const candidate = data.candidates.find(item => item.skillId === skillId);
+          if (!candidate) {
+            selector.setError('Selecione uma habilidade disponível.');
+            selector.select.focus();
+            return;
+          }
+
+          const changing = data.objective !== null;
+          const dialog = UI.ConfirmDialog({
+            title: changing ? 'Confirmar troca de objetivo?' : 'Confirmar novo objetivo?',
+            message: changing
+              ? `O objetivo atual será trocado de ${data.objective.name} para ${candidate.name}. A progressão das habilidades e o Guild Bank não serão alterados.`
+              : `${candidate.name} será definida como objetivo atual. A progressão da habilidade e o Guild Bank não serão alterados.`,
+            confirmLabel: changing ? 'Trocar objetivo' : 'Definir objetivo',
+          });
+          dialog.element.classList.add('pkl-guild-confirm');
+          if (!await dialog.open() || !host.isConnected) return;
+          await mutate_(skillId, saveButton, changing ? 'Trocando...' : 'Definindo...');
+        });
+
+        clearButton.addEventListener('click', async () => {
+          if (loading) return;
+          const objectiveName = data.objective ? data.objective.name : 'a referência atual';
+          const dialog = UI.ConfirmDialog({
+            title: 'Remover objetivo atual?',
+            message: `O objetivo ${objectiveName} será removido. A progressão das habilidades, o Guild Bank e as contribuições não serão alterados.`,
+            confirmLabel: 'Remover objetivo',
+            danger: true,
+            initialFocus: 'cancel',
+          });
+          dialog.element.classList.add('pkl-guild-confirm');
+          if (!await dialog.open() || !host.isConnected) return;
+          await mutate_(null, clearButton, 'Removendo...');
+        });
+
+        actions.append(saveButton, clearButton);
+        controls.append(selector.element, actions, liveStatus);
+        body.appendChild(controls);
+        refreshControls_();
+
+        host.replaceChildren(UI.Card({
+          title: 'Objetivo atual',
+          description: 'Escolha uma habilidade em progresso para concluir o nível atual inteiro.',
+          body,
+        }).element);
+
+        async function mutate_(skillId, button, loadingLabel) {
+          if (loading || !host.isConnected) return;
+          loading = true;
+          refreshControls_();
+          host.setAttribute('aria-busy', 'true');
+          UI.setButtonLoading(button, true, loadingLabel);
+          liveStatus.textContent = loadingLabel.replace('...', '…');
+          liveStatus.hidden = false;
+
+          try {
+            const updated = await ApiClient.request(
+              'guild.setCurrentObjective',
+              {skillId},
+            );
+            if (!host.isConnected) return;
+            validateObjectiveState_(updated);
+            data = updated;
+            loading = false;
+            render_();
+            UI.Toast({
+              variant: 'success',
+              title: skillId === null ? 'Objetivo removido' : 'Objetivo atualizado',
+              message: skillId === null
+                ? 'A Guild está sem objetivo atual.'
+                : 'O objetivo atual foi salvo com sucesso.',
+            });
+            const nextFocus = host.querySelector(
+              skillId === null ? '.pkl-select' : '.pkl-guild-objective-admin__actions .pkl-button',
+            );
+            if (nextFocus) nextFocus.focus();
+          } catch (error) {
+            if (!host.isConnected || handleAuth_(error, options)) return;
+            liveStatus.className = 'pkl-status pkl-status--error';
+            liveStatus.setAttribute('role', 'alert');
+            liveStatus.textContent = error && error.code === 'CONFLICT'
+              ? error.message
+              : 'Não foi possível atualizar o objetivo. Tente novamente.';
+            liveStatus.hidden = false;
+          } finally {
+            loading = false;
+            host.removeAttribute('aria-busy');
+            if (host.isConnected && button.isConnected) {
+              UI.setButtonLoading(button, false);
+              refreshControls_();
+            }
+          }
+        }
+      }
+
+      async function refresh_() {
+        if (loading || !host.isConnected) return;
+        loading = true;
+        host.setAttribute('aria-busy', 'true');
+        const status = document.createElement('p');
+        status.className = 'pkl-status';
+        status.setAttribute('role', 'status');
+        status.textContent = 'Atualizando objetivo...';
+        host.replaceChildren(status, UI.Skeleton({lines: 4}));
+
+        try {
+          const updated = await ApiClient.request('guild.getAdminObjective', {});
+          if (!host.isConnected) return;
+          validateObjectiveState_(updated);
+          data = updated;
+          loading = false;
+          render_();
+        } catch (error) {
+          if (!host.isConnected || handleAuth_(error, options)) return;
+          const retry = UI.Button({label: 'Tentar novamente', onClick: refresh_});
+          host.replaceChildren(UI.EmptyState({
+            title: 'Não foi possível carregar o objetivo',
+            description: error && error.code === 'CONFLICT'
+              ? error.message
+              : 'O formulário da Guild foi preservado. Tente carregar somente esta seção novamente.',
+            action: retry,
+          }).element);
+          host.firstChild.setAttribute('role', 'alert');
+        } finally {
+          loading = false;
+          host.removeAttribute('aria-busy');
+        }
+      }
+
+      render_();
+      if (data === null) window.queueMicrotask(refresh_);
+      return {refresh: refresh_};
+    }
+
+    function buildObjectiveSummary_(objective) {
+      const section = document.createElement('section');
+      section.className = 'pkl-guild-objective-admin__summary';
+      const header = document.createElement('div');
+      header.className = 'pkl-guild-objective-admin__header';
+      const titleGroup = document.createElement('div');
+      const name = document.createElement('h4');
+      name.className = 'pkl-guild-objective-admin__name';
+      name.textContent = objective.name;
+      const level = document.createElement('p');
+      level.className = 'pkl-guild-objective-admin__level';
+      level.textContent = `Nível ${objective.currentLevel} → ${objective.targetLevel}`;
+      titleGroup.append(name, level);
+      header.append(titleGroup, UI.Badge({label: 'Objetivo atual', variant: 'info'}));
+
+      const buff = document.createElement('p');
+      buff.className = 'pkl-guild-objective-admin__buff';
+      buff.textContent = `Próximo buff — nível ${objective.nextBuff.level}: ${objective.nextBuff.description}`;
+      const progress = UI.Progress({
+        label: 'Progresso do nível',
+        value: objective.progressPercent,
+        max: 100,
+        valueText: `${formatDecimal_(objective.progressPercent, 1)}% — ${objective.currentStep} de ${objective.totalSteps} steps`,
+      });
+      const metrics = document.createElement('div');
+      metrics.className = 'pkl-guild-objective-admin__metrics';
+      [
+        ['Steps restantes', String(objective.remainingSteps)],
+      ].forEach(([label, value]) => {
+        metrics.appendChild(UI.StatCard({label, value}).element);
+      });
+
+      section.append(header, buff, progress.element, metrics);
+      return section;
+    }
+
+    function formatDecimal_(value, maximumFractionDigits) {
+      return new Intl.NumberFormat('pt-BR', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits,
+      }).format(value);
+    }
+
+    function validateObjectiveState_(data) {
+      if (!data || typeof data !== 'object' ||
+          typeof data.initialized !== 'boolean' ||
+          typeof data.canClearObjective !== 'boolean' ||
+          typeof data.candidatesAvailable !== 'boolean' ||
+          !Array.isArray(data.candidates)) {
+        throw new Error('Estado administrativo do objetivo inválido.');
+      }
+      if (data.objectiveError !== null &&
+          (!data.objectiveError || typeof data.objectiveError.code !== 'string' ||
+           typeof data.objectiveError.message !== 'string')) {
+        throw new Error('Erro administrativo do objetivo inválido.');
+      }
+      data.candidates.forEach(validateObjectiveCandidate_);
+      if (!data.initialized) {
+        if (data.objective !== null || data.canClearObjective || data.candidates.length !== 0) {
+          throw new Error('Estado vazio do objetivo inválido.');
+        }
+        return;
+      }
+      if (data.objective !== null) validateObjective_(data.objective);
+    }
+
+    function validateObjectiveCandidate_(candidate) {
+      if (!candidate || typeof candidate.skillId !== 'string' ||
+          typeof candidate.name !== 'string' || candidate.name.trim() === '' ||
+          !Number.isSafeInteger(candidate.currentLevel) || candidate.currentLevel < 0 ||
+          !Number.isSafeInteger(candidate.targetLevel) ||
+          candidate.targetLevel !== candidate.currentLevel + 1 ||
+          !Number.isSafeInteger(candidate.currentStep) || candidate.currentStep < 0 ||
+          !Number.isSafeInteger(candidate.totalSteps) || candidate.totalSteps < 1 ||
+          candidate.currentStep >= candidate.totalSteps ||
+          !candidate.nextBuff || candidate.nextBuff.level !== candidate.targetLevel ||
+          typeof candidate.nextBuff.description !== 'string') {
+        throw new Error('Candidata a objetivo inválida.');
+      }
+    }
+
+    function validateObjective_(objective) {
+      validateObjectiveCandidate_(objective);
+      const integerFields = [
+        'remainingSteps',
+      ];
+      if (integerFields.some(field =>
+        !Number.isSafeInteger(objective[field]) || objective[field] < 0) ||
+          typeof objective.progressPercent !== 'number' ||
+          !Number.isFinite(objective.progressPercent) ||
+          objective.progressPercent < 0 || objective.progressPercent >= 100) {
+        throw new Error('Objetivo atual inválido.');
+      }
+    }
+
+    function validateState_(state) {
+      const numericFields = ['level', 'bankBalance', 'xpTotal', 'xpProximoNivel', 'vagas', 'rankingHoje', 'rankingOntem'];
+      if (!state || typeof state.initialized !== 'boolean') throw new Error('Estado da Guild inválido.');
+      if (!state.initialized) {
+        if (numericFields.some(field => state[field] !== null) || state.updatedAt !== null) {
+          throw new Error('Estado vazio inválido.');
+        }
+        return;
+      }
+      if (numericFields.some(field => !Number.isInteger(state[field]) || state[field] < 0) ||
+          typeof state.updatedAt !== 'string' || Number.isNaN(Date.parse(state.updatedAt))) {
+        throw new Error('Estado da Guild inválido.');
+      }
+    }
+
+    function handleAuth_(error, options) {
+      if (!error || error.code !== 'AUTH_REQUIRED') return false;
+      if (typeof options.onAuthRequired === 'function') options.onAuthRequired();
+      return true;
+    }
+
+    return {render, refresh};
+  })();
+</script>

@@ -1,0 +1,411 @@
+<script>
+  const PodexImportAdminView = (() => {
+    const ENTITIES = Object.freeze([
+      {key: 'categories',    label: 'Categorias'},
+      {key: 'subcategories', label: 'Subcategorias'},
+      {key: 'rarities',      label: 'Raridades'},
+      {key: 'items',         label: 'Itens'},
+      {key: 'requirements',  label: 'Requisitos'},
+    ]);
+
+    const FIELD_LABELS = Object.freeze({
+      name: 'Nome', sortOrder: 'Ordem', completionBuff: 'Buff de conclusão',
+      originType: 'Tipo de origem', origin: 'Origem', imageUrl: 'Imagem',
+      quantity: 'Quantidade', categoryId: 'Categoria pai', subcategoryId: 'Subcategoria pai',
+    });
+
+    const NEW_TEMPLATE_HINT = 'Gere um novo template CURRENT antes da próxima grande atualização.';
+
+    // Sobrevive ao recarregamento do catálogo feito após o apply.
+    let lastApplied = null;
+
+    function render(options = {}) {
+      const root = document.createElement('section');
+      root.className = 'pkl-podex-import';
+      root.setAttribute('aria-label', 'Importação do Podex');
+
+      let preview = null;
+      let previewSource = null;
+      let previewCatalog = null;
+      let busy = false;
+
+      // ---- Modelo --------------------------------------------------------
+      const tplSection = mkSection_('Modelo de importação',
+        'Gere uma planilha modelo, edite-a no Google Sheets e informe o link abaixo. ' +
+        'Use CURRENT para atualizar uma base existente; EMPTY é somente para a primeira carga.');
+      const tplActions = document.createElement('div');
+      tplActions.className = 'pkl-podex-import__actions';
+      const emptyBtn = UI.Button({label: 'Gerar template EMPTY', variant: 'secondary', onClick: () => createTemplate_('EMPTY', emptyBtn)});
+      const currentBtn = UI.Button({label: 'Gerar template CURRENT', variant: 'secondary', onClick: () => createTemplate_('CURRENT', currentBtn)});
+      tplActions.append(emptyBtn, currentBtn);
+      const tplResult = document.createElement('div');
+      tplResult.className = 'pkl-podex-import__template-result';
+      tplResult.setAttribute('role', 'status');
+      tplResult.setAttribute('aria-live', 'polite');
+      tplSection.append(tplActions, tplResult);
+
+      // ---- Prévia --------------------------------------------------------
+      const prevSection = mkSection_('Prévia da importação',
+        'Informe o link ou o ID da planilha preenchida. A prévia não altera nenhum dado.');
+      const sourceField = UI.Input({
+        label: 'Link ou ID da planilha',
+        placeholder: 'https://docs.google.com/spreadsheets/d/...',
+        autocomplete: 'off',
+      });
+      const previewBtn = UI.Button({label: 'Gerar prévia', onClick: runPreview_});
+      const prevActions = document.createElement('div');
+      prevActions.className = 'pkl-podex-import__actions';
+      prevActions.appendChild(previewBtn);
+      const prevStatus = document.createElement('p');
+      prevStatus.className = 'pkl-status'; prevStatus.setAttribute('role', 'status'); prevStatus.hidden = true;
+      const prevError = mkErrorBox_();
+      const prevHost = document.createElement('div');
+      prevHost.className = 'pkl-podex-import__preview';
+      prevSection.append(sourceField.element, prevActions, prevStatus, prevError, prevHost);
+
+      // ---- Resultado do último apply ------------------------------------
+      const resultHost = document.createElement('div');
+      resultHost.className = 'pkl-podex-import__result';
+      resultHost.setAttribute('role', 'status');
+      resultHost.setAttribute('aria-live', 'polite');
+
+      root.append(tplSection, prevSection, resultHost);
+      renderLastApplied_();
+
+      sourceField.input.addEventListener('input', () => {
+        if (preview) invalidatePreview_();
+        prevError.hidden = true;
+      });
+
+      function invalidatePreview_() {
+        preview = null; previewSource = null; previewCatalog = null;
+        prevHost.replaceChildren();
+      }
+
+      function renderLastApplied_() {
+        resultHost.replaceChildren();
+        if (!lastApplied) return;
+        const box = document.createElement('div');
+        box.className = 'pkl-podex-import__success';
+        const title = document.createElement('strong');
+        title.textContent = 'Importação aplicada com sucesso.';
+        const text = document.createElement('p');
+        text.textContent = summaryLine_(lastApplied.summary);
+        box.append(title, text);
+        if (lastApplied.hasNewRecords) {
+          const hint = document.createElement('p');
+          hint.textContent = NEW_TEMPLATE_HINT;
+          box.appendChild(hint);
+        }
+        resultHost.appendChild(box);
+      }
+
+      // ---- Ações ---------------------------------------------------------
+
+      async function createTemplate_(mode, btn) {
+        if (busy) return;
+        busy = true;
+        UI.setButtonLoading(btn, true, 'Gerando...');
+        tplResult.replaceChildren();
+        try {
+          const tpl = await ApiClient.request('podex.createImportTemplate', {mode});
+          const p = document.createElement('p');
+          p.append(`Template ${tpl.mode} criado: `);
+          const a = document.createElement('a');
+          a.href = tpl.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+          a.textContent = 'abrir planilha (nova aba)';
+          p.appendChild(a);
+          tplResult.appendChild(p);
+          sourceField.input.value = tpl.url;
+          if (preview) invalidatePreview_();
+          UI.Toast({variant: 'success', title: 'Template criado', message: `Template ${tpl.mode} pronto para edição.`});
+        } catch (err) {
+          if (handleAuth_(err, options)) return;
+          const e = mkErrorBox_();
+          e.textContent = err && err.message ? err.message : 'Não foi possível criar o template.';
+          e.hidden = false;
+          tplResult.appendChild(e);
+        } finally {
+          busy = false;
+          if (btn.isConnected) UI.setButtonLoading(btn, false);
+        }
+      }
+
+      async function runPreview_() {
+        if (busy) return;
+        const source = sourceField.input.value.trim();
+        sourceField.setError(null);
+        prevError.hidden = true;
+        if (!source) {
+          sourceField.setError('Informe o link ou o ID da planilha.');
+          sourceField.input.focus();
+          return;
+        }
+        busy = true;
+        invalidatePreview_();
+        lastApplied = null; renderLastApplied_();
+        UI.setButtonLoading(previewBtn, true, 'Gerando prévia...');
+        prevStatus.textContent = 'Lendo a planilha e comparando com a base atual...';
+        prevStatus.hidden = false;
+        try {
+          const [result, catalog] = await Promise.all([
+            ApiClient.request('podex.previewImport', {spreadsheet: source}),
+            ApiClient.request('podex.getAdminCatalog', {}),
+          ]);
+          if (sourceField.input.value.trim() !== source) return;
+          preview = result; previewSource = source; previewCatalog = catalog;
+          renderPreview_();
+        } catch (err) {
+          if (handleAuth_(err, options)) return;
+          showError_(prevError, err, 'Não foi possível gerar a prévia.');
+        } finally {
+          busy = false;
+          prevStatus.hidden = true;
+          if (previewBtn.isConnected) UI.setButtonLoading(previewBtn, false);
+        }
+      }
+
+      async function runApply_(applyBtn) {
+        if (busy || !preview) return;
+        const removals = totalRemoved_(preview.summary);
+        const confirmed = await UI.ConfirmDialog({
+          title: 'Aplicar importação?',
+          message: removals > 0
+            ? `${summaryLine_(preview.summary)} Atenção: ${removals} registro(s) serão removidos permanentemente.`
+            : summaryLine_(preview.summary),
+          confirmLabel: 'Aplicar importação',
+          danger: removals > 0,
+        }).open();
+        if (!confirmed) return;
+
+        busy = true;
+        UI.setButtonLoading(applyBtn, true, 'Aplicando...');
+        prevError.hidden = true;
+        try {
+          const result = await ApiClient.request('podex.applyImport', {spreadsheet: previewSource, previewToken: preview.previewToken});
+          lastApplied = result;
+          invalidatePreview_();
+          renderLastApplied_();
+          UI.Toast({variant: 'success', title: 'Importação aplicada', message: 'O catálogo do Podex foi atualizado.'});
+          if (typeof options.onImported === 'function') options.onImported();
+        } catch (err) {
+          if (handleAuth_(err, options)) return;
+          if (err && err.code === 'CONFLICT') invalidatePreview_();
+          showError_(prevError, err, 'Não foi possível aplicar a importação.');
+        } finally {
+          busy = false;
+          if (applyBtn.isConnected) UI.setButtonLoading(applyBtn, false);
+        }
+      }
+
+      // ---- Renderização da prévia ---------------------------------------
+
+      function renderPreview_() {
+        const p = preview;
+        const wrap = document.createElement('div');
+        wrap.className = 'pkl-podex-import__preview-body';
+
+        const head = document.createElement('p');
+        head.className = 'pkl-podex-import__mode';
+        head.append('Modo do template: ', UI.Badge({label: p.mode, variant: 'info'}));
+        wrap.appendChild(head);
+
+        const table = UI.Table({
+          caption: 'Resumo da importação',
+          columns: [
+            {key: 'entity',    label: 'Entidade'},
+            {key: 'new',       label: 'Novos',     align: 'end'},
+            {key: 'changed',   label: 'Alterados', align: 'end'},
+            {key: 'unchanged', label: 'Mantidos',  align: 'end'},
+            {key: 'removed',   label: 'Removidos', align: 'end'},
+          ],
+          rows: ENTITIES.map(e => ({
+            entity: e.label,
+            new: String(p.summary[e.key].new),
+            changed: String(p.summary[e.key].changed),
+            unchanged: String(p.summary[e.key].unchanged),
+            removed: String(p.summary[e.key].removed),
+          })),
+        });
+        wrap.appendChild(table.element);
+
+        const lv = p.summary.levels;
+        const levels = document.createElement('p');
+        levels.className = 'pkl-podex-import__levels';
+        levels.textContent = `Níveis (derivados das raridades): ${lv.added} novos, ${lv.preserved} mantidos, ${lv.removed} removidos.`;
+        wrap.appendChild(levels);
+
+        const removals = totalRemoved_(p.summary);
+        if (removals > 0) {
+          const warn = document.createElement('p');
+          warn.className = 'pkl-podex-import__warning';
+          warn.setAttribute('role', 'alert');
+          warn.append(UI.Badge({label: 'Atenção', variant: 'danger'}),
+            ` ${removals} registro(s) ausentes na planilha serão removidos junto com o que depende deles.`);
+          wrap.appendChild(warn);
+        }
+
+        ENTITIES.forEach(e => {
+          const details = buildDetails_(e);
+          if (details) wrap.appendChild(details);
+        });
+
+        if (totalChanges_(p.summary) === 0) {
+          const none = document.createElement('p');
+          none.className = 'pkl-podex-import__none';
+          none.textContent = 'Nenhuma diferença entre a planilha e a base atual. Não há nada a aplicar.';
+          wrap.appendChild(none);
+        } else {
+          const applyBtn = UI.Button({label: 'Aplicar importação', variant: removals > 0 ? 'danger' : 'primary', onClick: () => runApply_(applyBtn)});
+          const actions = document.createElement('div');
+          actions.className = 'pkl-podex-import__actions';
+          actions.appendChild(applyBtn);
+          wrap.appendChild(actions);
+        }
+
+        prevHost.replaceChildren(wrap);
+      }
+
+      function buildDetails_(entity) {
+        const c = preview.changes[entity.key];
+        if (!c.new.length && !c.changed.length && !c.removed.length) return null;
+        const d = document.createElement('details');
+        d.className = 'pkl-podex-import__details';
+        if (c.removed.length) d.open = true;
+        const s = document.createElement('summary');
+        s.textContent = `${entity.label} — ${c.new.length} novo(s), ${c.changed.length} alterado(s), ${c.removed.length} removido(s)`;
+        d.appendChild(s);
+
+        const ul = document.createElement('ul');
+        ul.className = 'pkl-podex-import__list';
+        c.new.forEach(r => ul.appendChild(mkLine_('Novo', 'success', describeNew_(entity.key, r))));
+        c.changed.forEach(r => ul.appendChild(mkLine_('Alterado', 'warning', describeChanged_(entity.key, r))));
+        c.removed.forEach(r => {
+          const li = mkLine_('Removido', 'danger', describeRemoved_(entity.key, r));
+          li.classList.add('pkl-podex-import__line--removed');
+          ul.appendChild(li);
+        });
+        d.appendChild(ul);
+        return d;
+      }
+
+      // ---- Descrições (resolvem nomes pelo catálogo atual) ---------------
+
+      function nameOf_(list, idField, id) {
+        const found = list.find(x => x[idField] === id);
+        return found ? found.name : id;
+      }
+      const rarityName_ = id => nameOf_(previewCatalog.rarities, 'rarityId', id);
+      const itemName_   = id => nameOf_(previewCatalog.items, 'itemId', id);
+      function levelInfo_(podexLevelId) {
+        const lvl = previewCatalog.levels.find(l => l.podexLevelId === podexLevelId);
+        return lvl ? `${rarityName_(lvl.rarityId)} · Nível ${lvl.level}` : podexLevelId;
+      }
+
+      function describeNew_(key, r) {
+        if (key === 'requirements') return `${rarityName_(r.rarityRef)} · Nível ${r.level} · ${itemName_(r.itemRef)} × ${r.quantity}`;
+        if (key === 'items') return `${r.name} (${r.origin})`;
+        return r.name;
+      }
+
+      function describeRemoved_(key, r) {
+        if (key === 'requirements') return `${levelInfo_(r.podexLevelId)} · ${itemName_(r.itemId)} × ${r.quantity}`;
+        if (key === 'items') return `${r.name} (${r.origin})`;
+        return r.name;
+      }
+
+      function describeChanged_(key, r) {
+        let subject;
+        if (key === 'requirements') subject = `${levelInfo_(r.podexLevelId)} · ${itemName_(r.itemId)}`;
+        else subject = r.before.name;
+        const diffs = Object.keys(r.after)
+          .filter(f => r.before[f] !== r.after[f])
+          .map(f => {
+            const label = FIELD_LABELS[f] || f;
+            if (/Id$/.test(f)) return `${label} alterado`;
+            return `${label}: ${fmt_(r.before[f])} → ${fmt_(r.after[f])}`;
+          });
+        return `${subject} — ${diffs.join('; ')}`;
+      }
+
+      return root;
+    }
+
+    // =========================================================================
+    // HELPERS
+    // =========================================================================
+
+    function fmt_(v) { return v === null || v === undefined || v === '' ? '(vazio)' : String(v); }
+
+    function mkSection_(title, description) {
+      const s = document.createElement('section');
+      s.className = 'pkl-podex-import__section';
+      const h = document.createElement('h3');
+      h.className = 'pkl-podex-import__title'; h.textContent = title;
+      const p = document.createElement('p');
+      p.className = 'pkl-podex-import__description'; p.textContent = description;
+      s.append(h, p);
+      return s;
+    }
+
+    function mkLine_(label, variant, text) {
+      const li = document.createElement('li');
+      li.className = 'pkl-podex-import__line';
+      const b = UI.Badge({label, variant});
+      const span = document.createElement('span');
+      span.textContent = text;
+      li.append(b, span);
+      return li;
+    }
+
+    function mkErrorBox_() {
+      const el = document.createElement('div');
+      el.className = 'pkl-status pkl-status--error pkl-podex-import__error';
+      el.setAttribute('role', 'alert'); el.tabIndex = -1; el.hidden = true;
+      return el;
+    }
+
+    function showError_(el, err, fallback) {
+      el.replaceChildren();
+      const msg = document.createElement('p');
+      msg.textContent = err && err.message ? err.message : fallback;
+      el.appendChild(msg);
+      const list = err && err.fields && Array.isArray(err.fields.validationErrors) ? err.fields.validationErrors : [];
+      if (list.length) {
+        const ul = document.createElement('ul');
+        list.forEach(v => {
+          const li = document.createElement('li');
+          li.textContent = `${v.section} — ${v.recordRef || '(sem ref)'} — ${v.field || ''}: ${v.message}`;
+          ul.appendChild(li);
+        });
+        el.appendChild(ul);
+      }
+      el.hidden = false;
+      el.focus();
+    }
+
+    function totalRemoved_(summary) {
+      return ENTITIES.reduce((n, e) => n + summary[e.key].removed, 0);
+    }
+
+    function totalChanges_(summary) {
+      return ENTITIES.reduce((n, e) => n + summary[e.key].new + summary[e.key].changed + summary[e.key].removed, 0);
+    }
+
+    function summaryLine_(summary) {
+      const parts = ENTITIES.map(e => {
+        const s = summary[e.key];
+        return `${e.label}: ${s.new} novos, ${s.changed} alterados, ${s.removed} removidos`;
+      });
+      return parts.join(' · ') + '.';
+    }
+
+    function handleAuth_(error, options) {
+      if (!error || error.code !== 'AUTH_REQUIRED') return false;
+      if (typeof options.onAuthRequired === 'function') options.onAuthRequired();
+      return true;
+    }
+
+    return {render};
+  })();
+</script>

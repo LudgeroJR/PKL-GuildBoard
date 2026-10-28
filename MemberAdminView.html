@@ -1,0 +1,448 @@
+<script>
+  const MemberAdminView = (() => {
+    let renderGeneration = 0;
+
+    function render(options = {}) {
+      const generation = ++renderGeneration;
+
+      const section = document.createElement("section");
+
+      section.className = "pkl-member-admin";
+
+      section.setAttribute("aria-labelledby", "pkl-member-admin-title");
+
+      const header = document.createElement("div");
+
+      header.className = "pkl-member-admin__header";
+
+      const heading = document.createElement("div");
+
+      heading.innerHTML = `
+    <h2
+      id="pkl-member-admin-title"
+      class="pkl-member-admin__title"
+    >
+      Membros
+    </h2>
+
+    <p class="pkl-member-admin__description">
+      Lista sincronizada automaticamente a partir da API da Guild. Entrada e saída de membros são refletidas aqui sem ação manual.
+    </p>
+  `;
+
+      const content = document.createElement("div");
+
+      content.className = "pkl-member-admin__content";
+
+      header.appendChild(heading);
+
+      section.appendChild(header);
+      section.appendChild(content);
+
+      renderLoading_(content);
+
+      loadMembers_(content, generation, options);
+
+      return section;
+    }
+
+    async function loadMembers_(content, generation, options) {
+      try {
+        const members = await ApiClient.request("members.list", {});
+
+        if (generation !== renderGeneration) {
+          return;
+        }
+
+        if (!Array.isArray(members)) {
+          throw new Error("Resposta inválida ao carregar membros.");
+        }
+
+        const sortedMembers = sortMembers_(members);
+
+        renderMembers_(content, sortedMembers, generation, options);
+      } catch (error) {
+        if (generation !== renderGeneration) {
+          return;
+        }
+
+        if (
+          error &&
+          error.code === "AUTH_REQUIRED" &&
+          typeof options.onAuthRequired === "function"
+        ) {
+          options.onAuthRequired();
+          return;
+        }
+
+        renderLoadError_(content, generation, options);
+      }
+    }
+
+    function renderLoading_(content) {
+      content.replaceChildren();
+
+      const status = document.createElement("div");
+
+      status.className = "pkl-member-admin__loading";
+
+      status.setAttribute("role", "status");
+      status.setAttribute("aria-live", "polite");
+
+      const message = document.createElement("p");
+
+      message.className = "pkl-member-admin__loading-text";
+
+      message.textContent = "Carregando membros...";
+
+      status.appendChild(message);
+      status.appendChild(
+        UI.Skeleton({
+          lines: 5,
+        }),
+      );
+
+      content.appendChild(status);
+    }
+
+    function renderLoadError_(content, generation, options) {
+      const retryButton = UI.Button({
+        label: "Tentar novamente",
+        variant: "secondary",
+        type: "button",
+      });
+
+      retryButton.addEventListener("click", () => {
+        renderLoading_(content);
+
+        loadMembers_(content, generation, options);
+      });
+
+      const emptyState = UI.EmptyState({
+        title: "Não foi possível carregar os membros",
+        description:
+          "Tente novamente. Se o problema continuar, verifique a conexão e tente mais tarde.",
+        action: retryButton,
+      });
+
+      content.replaceChildren(emptyState.element);
+    }
+
+    function renderMembers_(content, members, generation, options) {
+      content.replaceChildren();
+
+      if (members.length === 0) {
+        const emptyState = UI.EmptyState({
+          title: "Nenhum membro sincronizado",
+          description:
+            "A lista é preenchida automaticamente pela sincronização com a API da Guild.",
+        });
+
+        content.appendChild(emptyState.element);
+        return;
+      }
+
+      const desktop = document.createElement("div");
+
+      desktop.className = "pkl-member-admin__desktop";
+
+      const table = UI.Table({
+        caption: "Membros sincronizados",
+        columns: [
+          {
+            key: "name",
+            label: "Nome",
+          },
+          {
+            key: "guildRole",
+            label: "Cargo",
+          },
+          {
+            key: "level",
+            label: "Nível",
+            align: "end",
+          },
+          {
+            key: "joinedAt",
+            label: "Entrada",
+          },
+          {
+            key: "leftAt",
+            label: "Saída",
+          },
+          {
+            key: "targetRequired",
+            label: "Meta",
+          },
+          {
+            key: "status",
+            label: "Status",
+          },
+          { key: "action", label: "Exceção de meta" },
+        ],
+        rows: members.map((member) => createDesktopRow_(member, saveTarget_)),
+      });
+
+      desktop.appendChild(table.element);
+
+      const mobile = document.createElement("div");
+
+      mobile.className = "pkl-member-admin__mobile";
+
+      mobile.setAttribute("aria-label", "Membros sincronizados");
+
+      members.forEach((member) => {
+        mobile.appendChild(createMobileCard_(member, saveTarget_));
+      });
+
+      content.appendChild(desktop);
+      content.appendChild(mobile);
+
+      async function saveTarget_(member, button) {
+        const targetRequired = !member.targetRequired;
+        UI.setButtonLoading(button, true, "Salvando...");
+        try {
+          const saved = await ApiClient.request("members.setTargetRequired", {
+            memberId: member.memberId,
+            targetRequired,
+          });
+          if (generation !== renderGeneration || !content.isConnected) return;
+          renderMembers_(content, sortMembers_(members.map(item =>
+            item.memberId === saved.memberId ? saved : item,
+          )), generation, options);
+          UI.Toast({
+            variant: "success",
+            title: "Obrigação de meta atualizada",
+            message: `${saved.name}: ${saved.targetRequired ? "meta obrigatória" : "sem obrigação"}.`,
+          });
+        } catch (error) {
+          if (generation !== renderGeneration || !content.isConnected) return;
+          if (error && error.code === "AUTH_REQUIRED" &&
+              typeof options.onAuthRequired === "function") {
+            options.onAuthRequired();
+            return;
+          }
+          UI.Toast({variant: "danger", title: "Falha ao salvar meta",
+            message: error && error.message ? error.message : "Tente novamente."});
+        } finally {
+          if (button.isConnected) UI.setButtonLoading(button, false);
+        }
+      }
+    }
+
+    function createDesktopRow_(member, saveTarget) {
+      return {
+        name: member.name,
+
+        guildRole: getGuildRoleLabel_(member.guildRole),
+
+        level: String(member.level),
+
+        joinedAt: formatMemberDateTime_(member.joinedAt),
+
+        leftAt:
+          member.leftAt === null ? "—" : formatMemberDateTime_(member.leftAt),
+
+        targetRequired: createTargetBadge_(member.targetRequired),
+
+        status: createStatusBadge_(member.status),
+        action: createTargetAction_(member, saveTarget),
+      };
+    }
+
+    function createMobileCard_(member, saveTarget) {
+      const card = document.createElement("article");
+
+      card.className = "pkl-member-card";
+
+      const header = document.createElement("div");
+
+      header.className = "pkl-member-card__header";
+
+      const identity = document.createElement("div");
+
+      identity.className = "pkl-member-card__identity";
+
+      const name = document.createElement("h3");
+
+      name.className = "pkl-member-card__name";
+
+      name.textContent = member.name;
+
+      const role = document.createElement("span");
+
+      role.className = "pkl-member-card__role";
+
+      role.textContent = getGuildRoleLabel_(member.guildRole);
+
+      identity.appendChild(name);
+      identity.appendChild(role);
+
+      header.appendChild(identity);
+      header.appendChild(createStatusBadge_(member.status));
+
+      const details = document.createElement("dl");
+
+      details.className = "pkl-member-card__details";
+
+      details.appendChild(createDetailRow_("Nível", String(member.level)));
+
+      details.appendChild(
+        createDetailRow_("Meta", createTargetBadge_(member.targetRequired)),
+      );
+
+      details.appendChild(
+        createDetailRow_("Entrada", formatMemberDateTime_(member.joinedAt)),
+      );
+
+      if (member.leftAt !== null) {
+        details.appendChild(
+          createDetailRow_("Saída", formatMemberDateTime_(member.leftAt)),
+        );
+      }
+
+      card.appendChild(header);
+      card.appendChild(details);
+      card.appendChild(createTargetAction_(member, saveTarget));
+
+      return card;
+    }
+
+    function createDetailRow_(label, value) {
+      const row = document.createElement("div");
+
+      row.className = "pkl-member-card__detail";
+
+      const term = document.createElement("dt");
+
+      term.textContent = label;
+
+      const description = document.createElement("dd");
+
+      if (value instanceof Node) {
+        description.appendChild(value);
+      } else {
+        description.textContent = String(value);
+      }
+
+      row.appendChild(term);
+      row.appendChild(description);
+
+      return row;
+    }
+
+    function createStatusBadge_(status) {
+      if (status === "ACTIVE") {
+        return UI.Badge({
+          label: "Ativo",
+          variant: "success",
+        });
+      }
+
+      if (status === "INACTIVE") {
+        return UI.Badge({
+          label: "Inativo",
+          variant: "neutral",
+        });
+      }
+
+      throw new Error(`Status de membro desconhecido: ${status}.`);
+    }
+
+    function createTargetBadge_(targetRequired) {
+      if (targetRequired === true) {
+        return UI.Badge({
+          label: "Obrigatória",
+          variant: "info",
+        });
+      }
+
+      if (targetRequired === false) {
+        return UI.Badge({
+          label: "Sem obrigação",
+          variant: "neutral",
+        });
+      }
+
+      throw new Error("Estado de obrigação de meta inválido.");
+    }
+
+    function createTargetAction_(member, saveTarget) {
+      const button = UI.Button({
+        label: member.targetRequired ? "Isentar da meta" : "Exigir meta",
+        variant: "secondary",
+        type: "button",
+      });
+      button.setAttribute("aria-label", `${member.targetRequired ? "Isentar" : "Exigir meta de"} ${member.name}`);
+      button.addEventListener("click", () => saveTarget(member, button));
+      return button;
+    }
+
+    function getGuildRoleLabel_(guildRole) {
+      switch (guildRole) {
+        case "LEADER":
+          return "Líder";
+
+        case "VICE_LEADER":
+          return "Vice-líder";
+
+        case "MEMBER":
+          return "Membro";
+
+        default:
+          throw new Error(`Cargo de membro desconhecido: ${guildRole}.`);
+      }
+    }
+
+    function formatMemberDateTime_(value) {
+      if (typeof value !== "string" || value.trim() === "") {
+        throw new Error("Datetime de membro inválido.");
+      }
+
+      const date = new Date(value);
+
+      if (Number.isNaN(date.getTime())) {
+        throw new Error("Datetime de membro inválido.");
+      }
+
+      const app = State.get().app;
+
+      const timezone =
+        app && typeof app.timezone === "string" && app.timezone.trim() !== ""
+          ? app.timezone
+          : "America/Sao_Paulo";
+
+      return new Intl.DateTimeFormat("pt-BR", {
+        timeZone: timezone,
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+        .format(date)
+        .replace(",", "");
+    }
+
+    function sortMembers_(members) {
+      return members.slice().sort((left, right) => {
+        const leftStatus = left.status === "ACTIVE" ? 0 : 1;
+
+        const rightStatus = right.status === "ACTIVE" ? 0 : 1;
+
+        if (leftStatus !== rightStatus) {
+          return leftStatus - rightStatus;
+        }
+
+        return String(left.name).localeCompare(String(right.name), "pt-BR", {
+          sensitivity: "base",
+        });
+      });
+    }
+
+    return {
+      render,
+    };
+  })();
+</script>

@@ -1,0 +1,238 @@
+<script>
+  const Router = (() => {
+    const ROUTES = Object.freeze({
+      '/': {
+        name: 'home',
+        view: HomeView
+      },
+
+      '/guild': {
+        name: 'guild',
+        view: GuildView
+      },
+
+      '/podex': {
+        name: 'podex',
+        view: PodexView
+      },
+
+      '/admin': {
+        name: 'admin',
+        view: AdminView
+      }
+    });
+
+    let isStarted = false;
+
+    function start() {
+      if (!isStarted) {
+        google.script.history.setChangeHandler(
+          handleHistoryChange_
+        );
+
+        document.addEventListener(
+          'click',
+          handleNavigationClick_
+        );
+
+        isStarted = true;
+      }
+
+      google.script.url.getLocation(
+        handleInitialLocation_
+      );
+    }
+
+    function navigate(hash) {
+      const fragment = toFragment_(hash);
+
+      if (!Object.prototype.hasOwnProperty.call(ROUTES, fragment)) {
+        replaceAndRender_('/');
+        return;
+      }
+
+      const currentRoute = State.get().route;
+
+      if (
+        currentRoute &&
+        currentRoute.hash === `#${fragment}`
+      ) {
+        renderRoute_(fragment);
+        return;
+      }
+
+      google.script.history.push(
+        {
+          route: ROUTES[fragment].name
+        },
+        null,
+        fragment
+      );
+
+      renderRoute_(fragment);
+    }
+
+    function handleNavigationClick_(event) {
+      const link = event.target.closest('[data-pkl-route]');
+
+      if (!link) {
+        return;
+      }
+
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const hash = link.getAttribute('data-pkl-route');
+
+      if (!hash) {
+        return;
+      }
+
+      event.preventDefault();
+      navigate(hash);
+    }
+
+    function handleInitialLocation_(location) {
+      const fragment = normalizeFragment_(
+        location && location.hash
+      );
+
+      resolveAndRender_(fragment);
+    }
+
+    function handleHistoryChange_(event) {
+      const fragment = normalizeFragment_(
+        event &&
+        event.location &&
+        event.location.hash
+      );
+
+      resolveAndRender_(fragment);
+    }
+
+    function resolveAndRender_(fragment) {
+      if (!Object.prototype.hasOwnProperty.call(ROUTES, fragment)) {
+        replaceAndRender_('/');
+        return;
+      }
+
+      renderRoute_(fragment);
+    }
+
+    function replaceAndRender_(fragment) {
+      const route = ROUTES[fragment];
+
+      google.script.history.replace(
+        {
+          route: route.name
+        },
+        null,
+        fragment
+      );
+
+      renderRoute_(fragment);
+    }
+
+    function renderRoute_(fragment) {
+      const route = ROUTES[fragment];
+
+      State.setRoute({
+        hash: `#${fragment}`,
+        name: route.name
+      });
+
+      renderView_(route.view);
+      updateNavigation_();
+
+      document.dispatchEvent(
+        new CustomEvent('pkl:route-rendered', {
+          detail: State.get().route
+        })
+      );
+    }
+
+    function renderView_(view) {
+      const pageRoot =
+        document.getElementById('pkl-page-root');
+
+      if (!pageRoot) {
+        throw new Error(
+          'Root de conteúdo da aplicação não encontrado.'
+        );
+      }
+
+      pageRoot.replaceChildren(view.render());
+      pageRoot.focus();
+    }
+
+    function updateNavigation_() {
+      const currentRoute = State.get().route;
+
+      document
+        .querySelectorAll('[data-pkl-route]')
+        .forEach((link) => {
+          const isActive =
+            currentRoute &&
+            link.getAttribute('data-pkl-route') ===
+              currentRoute.hash;
+
+          link.classList.toggle('is-active', Boolean(isActive));
+
+          if (isActive) {
+            link.setAttribute('aria-current', 'page');
+          } else {
+            link.removeAttribute('aria-current');
+          }
+        });
+    }
+
+    function toFragment_(hash) {
+      if (typeof hash !== 'string') {
+        return '/';
+      }
+
+      const normalized = hash.trim();
+
+      if (normalized.startsWith('#')) {
+        return normalizeFragment_(
+          normalized.slice(1)
+        );
+      }
+
+      return normalizeFragment_(normalized);
+    }
+
+    function normalizeFragment_(fragment) {
+      if (
+        typeof fragment !== 'string' ||
+        fragment.trim() === ''
+      ) {
+        return '/';
+      }
+
+      const normalized = fragment.trim();
+
+      return normalized.startsWith('/')
+        ? normalized
+        : `/${normalized}`;
+    }
+
+    document.addEventListener(
+      'pkl:bootstrap-ready',
+      start
+    );
+
+    return {
+      start,
+      navigate
+    };
+  })();
+</script>

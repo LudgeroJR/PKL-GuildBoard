@@ -1,0 +1,35 @@
+<script>
+  const UtilitiesClient = (() => {
+    let domIdCounter = 0;
+
+    function createDomId(prefix = 'pkl') {
+      const normalizedPrefix =
+        typeof prefix === 'string' &&
+        prefix.trim() !== ''
+          ? prefix
+              .trim()
+              .toLowerCase()
+              .replace(/[^a-z0-9-_]+/g, '-')
+          : 'pkl';
+
+      domIdCounter += 1;
+
+      return `${normalizedPrefix}-${domIdCounter}`;
+    }
+
+    function formatGameMoney(value) {
+      if (!Number.isInteger(value) || value < 0) {
+        throw new Error('Valor monetário inválido.');
+      }
+
+      return '$ ' + new Intl.NumberFormat('pt-BR', {
+        maximumFractionDigits: 0
+      }).format(value);
+    }
+
+    return {
+      createDomId,
+      formatGameMoney
+    };
+  })();
+</script>

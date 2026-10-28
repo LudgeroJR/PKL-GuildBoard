@@ -1,0 +1,160 @@
+<script>
+  const State = (() => {
+    const AUTH_STORAGE_KEY = "pkl.adminSession";
+
+    const state = {
+      route: null,
+      app: null,
+      auth: {
+        sessionToken: null,
+        expiresAt: null,
+        isAuthenticated: false,
+      },
+      cache: {},
+    };
+
+    function get() {
+      return state;
+    }
+
+    function setRoute(route) {
+      state.route = route;
+    }
+
+    function setApp(app) {
+      state.app = app;
+    }
+
+    function setAuth(auth) {
+      if (
+        !auth ||
+        typeof auth !== "object" ||
+        typeof auth.sessionToken !== "string" ||
+        auth.sessionToken.trim() === "" ||
+        typeof auth.expiresAt !== "string" ||
+        Number.isNaN(Date.parse(auth.expiresAt))
+      ) {
+        throw new Error("Estado de autenticação inválido.");
+      }
+
+      const normalizedAuth = {
+        sessionToken: auth.sessionToken.trim(),
+        expiresAt: auth.expiresAt,
+        isAuthenticated: true,
+      };
+
+      persistAuth_(normalizedAuth.sessionToken, normalizedAuth.expiresAt);
+
+      state.auth.sessionToken = normalizedAuth.sessionToken;
+
+      state.auth.expiresAt = normalizedAuth.expiresAt;
+
+      state.auth.isAuthenticated = true;
+
+      notifyAuthChanged_();
+
+      return state.auth;
+    }
+
+    function restoreAuth() {
+      const storedAuth = readStoredAuth_();
+
+      if (storedAuth === null) {
+        clearAuth();
+        return null;
+      }
+
+      state.auth.sessionToken = storedAuth.sessionToken;
+
+      state.auth.expiresAt = storedAuth.expiresAt;
+
+      state.auth.isAuthenticated = false;
+
+      notifyAuthChanged_();
+
+      return state.auth;
+    }
+
+    function clearAuth() {
+      state.auth.sessionToken = null;
+      state.auth.expiresAt = null;
+      state.auth.isAuthenticated = false;
+
+      try {
+        window.sessionStorage.removeItem(AUTH_STORAGE_KEY);
+      } catch (error) {
+        // Falha de storage não deve impedir
+        // a limpeza do estado em memória.
+      }
+
+      notifyAuthChanged_();
+    }
+
+    function persistAuth_(sessionToken, expiresAt) {
+      const serialized = JSON.stringify({
+        sessionToken,
+        expiresAt,
+      });
+
+      try {
+        window.sessionStorage.setItem(AUTH_STORAGE_KEY, serialized);
+      } catch (error) {
+        throw new Error(
+          "Não foi possível armazenar a sessão administrativa nesta aba.",
+        );
+      }
+    }
+
+    function readStoredAuth_() {
+      let serialized;
+
+      try {
+        serialized = window.sessionStorage.getItem(AUTH_STORAGE_KEY);
+      } catch (error) {
+        return null;
+      }
+
+      if (typeof serialized !== "string" || serialized === "") {
+        return null;
+      }
+
+      let storedAuth;
+
+      try {
+        storedAuth = JSON.parse(serialized);
+      } catch (error) {
+        return null;
+      }
+
+      if (
+        !storedAuth ||
+        typeof storedAuth !== "object" ||
+        Array.isArray(storedAuth) ||
+        typeof storedAuth.sessionToken !== "string" ||
+        storedAuth.sessionToken.trim() === "" ||
+        typeof storedAuth.expiresAt !== "string" ||
+        Number.isNaN(Date.parse(storedAuth.expiresAt))
+      ) {
+        return null;
+      }
+
+      return {
+        sessionToken: storedAuth.sessionToken.trim(),
+        expiresAt: storedAuth.expiresAt,
+      };
+    }
+
+    function notifyAuthChanged_() {
+      document.dispatchEvent(new CustomEvent("pkl:auth-changed"));
+    }
+
+    return {
+      get,
+      setRoute,
+      setApp,
+      setAuth,
+      restoreAuth,
+      clearAuth,
+    };
+  })();
+</script>

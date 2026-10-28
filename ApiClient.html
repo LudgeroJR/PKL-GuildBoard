@@ -1,0 +1,192 @@
+<script>
+  const ApiClient = (() => {
+    function request(action, payload = {}, sessionTokenOverride) {
+      const requestId = createRequestId_();
+
+      const sessionToken = resolveSessionToken_(
+        sessionTokenOverride,
+        arguments.length >= 3,
+      );
+
+      const request = {
+        action,
+        payload,
+        requestId,
+        sessionToken,
+      };
+
+      return new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler((response) => {
+            handleResponse_(response, requestId, resolve, reject);
+          })
+          .withFailureHandler(() => {
+            reject({
+              code: "TRANSPORT_ERROR",
+              message:
+                "Não foi possível comunicar com o servidor. Tente novamente.",
+              fields: null,
+              requestId,
+            });
+          })
+          .apiRequest(request);
+      });
+    }
+
+    function requestPublic(action, payload = {}) {
+      return request(action, payload, null);
+    }
+
+    function resolveSessionToken_(sessionTokenOverride, hasExplicitOverride) {
+      if (hasExplicitOverride) {
+        return normalizeSessionToken_(sessionTokenOverride);
+      }
+
+      const currentState = State.get();
+
+      if (!currentState || !currentState.auth) {
+        return null;
+      }
+
+      return normalizeSessionToken_(currentState.auth.sessionToken);
+    }
+
+    function normalizeSessionToken_(sessionToken) {
+      if (typeof sessionToken !== "string") {
+        return null;
+      }
+
+      const normalized = sessionToken.trim();
+
+      return normalized === "" ? null : normalized;
+    }
+
+    function handleResponse_(serializedResponse, requestId, resolve, reject) {
+      let response;
+
+      try {
+        response = parseApiResponse_(serializedResponse);
+      } catch (error) {
+        reject({
+          code: "INVALID_RESPONSE",
+          message: "O servidor retornou uma resposta inválida.",
+          fields: null,
+          requestId,
+        });
+
+        return;
+      }
+
+      if (response.ok === true) {
+        resolve(response.data === undefined ? null : response.data);
+
+        return;
+      }
+
+      if (
+        response.ok === false &&
+        response.error &&
+        typeof response.error === "object"
+      ) {
+        const normalizedError = {
+          code:
+            typeof response.error.code === "string"
+              ? response.error.code
+              : "INTERNAL_ERROR",
+
+          message:
+            typeof response.error.message === "string"
+              ? response.error.message
+              : "Não foi possível concluir a solicitação.",
+
+          fields:
+            response.error.fields === undefined ? null : response.error.fields,
+
+          requestId:
+            typeof response.error.requestId === "string"
+              ? response.error.requestId
+              : requestId,
+        };
+
+        handleAuthError_(normalizedError);
+
+        reject(normalizedError);
+
+        return;
+      }
+
+      reject({
+        code: "INVALID_RESPONSE",
+        message: "O servidor retornou uma resposta inválida.",
+        fields: null,
+        requestId,
+      });
+    }
+
+    function parseApiResponse_(serializedResponse) {
+      if (typeof serializedResponse !== "string") {
+        throw new Error("Resposta RPC não está serializada.");
+      }
+
+      const response = JSON.parse(serializedResponse);
+
+      if (
+        !response ||
+        typeof response !== "object" ||
+        Array.isArray(response)
+      ) {
+        throw new Error("Resposta RPC possui formato inválido.");
+      }
+
+      return response;
+    }
+
+    function handleAuthError_(error) {
+      if (!error || error.code !== "AUTH_REQUIRED") {
+        return;
+      }
+
+      State.clearAuth();
+    }
+
+    function createRequestId_() {
+      if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+      }
+
+      if (
+        window.crypto &&
+        typeof window.crypto.getRandomValues === "function"
+      ) {
+        const bytes = new Uint8Array(16);
+
+        window.crypto.getRandomValues(bytes);
+
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+        const hex = Array.from(bytes, (byte) =>
+          byte.toString(16).padStart(2, "0"),
+        );
+
+        return [
+          hex.slice(0, 4).join(""),
+          hex.slice(4, 6).join(""),
+          hex.slice(6, 8).join(""),
+          hex.slice(8, 10).join(""),
+          hex.slice(10, 16).join(""),
+        ].join("-");
+      }
+
+      throw new Error(
+        "Não foi possível gerar um identificador seguro para a solicitação.",
+      );
+    }
+
+    return {
+      request,
+      requestPublic,
+    };
+  })();
+</script>

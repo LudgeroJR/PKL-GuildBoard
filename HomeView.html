@@ -1,0 +1,463 @@
+<script>
+  const HomeView = (() => {
+    const ROLE_LABELS = Object.freeze({
+      LEADER: "Líder",
+      VICE_LEADER: "Vice-líder",
+      MEMBER: "Membro",
+    });
+
+    const CAPTURE_CLASS = "is-capture-mode";
+
+    function render() {
+      const section = document.createElement("section");
+
+      section.className = "pkl-view pkl-home-view";
+      section.setAttribute("aria-labelledby", "pkl-home-title");
+
+      section.innerHTML = `
+        <h1 id="pkl-home-title" class="pkl-view__title">Início</h1>
+
+        <p class="pkl-view__description">
+          Ranking semanal da Guild no Poke Legends.
+        </p>
+      `;
+
+      const content = document.createElement("div");
+      content.className = "pkl-home-view__content";
+
+      const membersHost = document.createElement("div");
+      const topLevelHost = document.createElement("div");
+      const taskRankingHost = document.createElement("div");
+      const bankHost = document.createElement("div");
+      const objectiveHost = document.createElement("div");
+      const highlights = document.createElement("div");
+      highlights.className = "pkl-home-highlights";
+
+      const captureButton = UI.Button({
+        label: "Modo de captura",
+        variant: "secondary",
+        icon: "camera",
+        disabled: true,
+        onClick: () => enterCapture_(captureButton, exitButton),
+      });
+      captureButton.classList.add("pkl-home-capture-entry");
+
+      const exitButton = UI.Button({
+        label: "Sair do modo de captura",
+        variant: "primary",
+        icon: "x",
+        onClick: () => exitCapture_(captureButton),
+      });
+
+      const ranking = RankingView.render({
+        taskRankingHost,
+        onData: (data) => {
+          captureButton.disabled = false;
+          membersHost.replaceChildren(
+            buildActiveMembers_(data.activeMemberCount),
+          );
+          topLevelHost.replaceChildren(buildTopLevel_(data.topLevelMembers));
+        },
+        onFailure: () => {
+          captureButton.disabled = true;
+          membersHost.replaceChildren(buildUnavailable_("Membros ativos"));
+          topLevelHost.replaceChildren(buildUnavailable_("Ranking de nível"));
+          taskRankingHost.replaceChildren(
+            buildUnavailable_("Ranking de tasks"),
+          );
+        },
+      });
+
+      highlights.append(taskRankingHost, topLevelHost);
+
+      const current = document.createElement("section");
+      const currentTitle = document.createElement("h2");
+      const currentGrid = document.createElement("div");
+      current.className = "pkl-home-current";
+      currentTitle.className = "pkl-guild-view__section-title";
+      currentTitle.textContent = "Situação atual da Guild";
+      currentGrid.className = "pkl-home-current__grid";
+      currentGrid.append(bankHost, membersHost);
+      current.append(currentTitle, currentGrid, objectiveHost);
+
+      content.append(
+        buildCaptureIdentity_(),
+        ranking,
+        highlights,
+        current,
+        buildInstitutional_(),
+      );
+      section.append(buildCaptureToolbar_(exitButton), captureButton, content);
+
+      membersHost.appendChild(UI.Skeleton({ lines: 2 }));
+      topLevelHost.appendChild(UI.Skeleton({ lines: 8 }));
+      taskRankingHost.appendChild(UI.Skeleton({ lines: 8 }));
+
+      // Após o Router anexar a view ao DOM; respostas de views removidas são descartadas.
+      window.queueMicrotask(() => {
+        loadSection_(
+          bankHost,
+          "guild.getPublicState",
+          validateState_,
+          buildBank_,
+          "o Guild Bank",
+        );
+        loadSection_(
+          objectiveHost,
+          "guild.getPublicObjective",
+          validateObjective_,
+          buildObjective_,
+          "o objetivo atual",
+        );
+      });
+
+      return section;
+    }
+
+    let activeExitHandlers = null;
+
+    function enterCapture_(entryButton, exitButton) {
+      const app = document.getElementById("pkl-app");
+      if (!app || activeExitHandlers) return;
+
+      app.classList.add(CAPTURE_CLASS);
+
+      const onKeydown = (event) => {
+        if (event.key === "Escape") exitCapture_(entryButton);
+      };
+      // Qualquer troca de rota limpa o modo (Router não é alterado).
+      const onRoute = () => clearCapture_();
+
+      document.addEventListener("keydown", onKeydown);
+      document.addEventListener("pkl:route-rendered", onRoute);
+      activeExitHandlers = { onKeydown, onRoute };
+
+      exitButton.focus();
+    }
+
+    function clearCapture_() {
+      const app = document.getElementById("pkl-app");
+      if (app) app.classList.remove(CAPTURE_CLASS);
+
+      if (activeExitHandlers) {
+        document.removeEventListener("keydown", activeExitHandlers.onKeydown);
+        document.removeEventListener(
+          "pkl:route-rendered",
+          activeExitHandlers.onRoute,
+        );
+        activeExitHandlers = null;
+      }
+    }
+
+    function exitCapture_(entryButton) {
+      clearCapture_();
+      if (entryButton.isConnected) entryButton.focus();
+    }
+
+    function buildCaptureToolbar_(exitButton) {
+      const bar = document.createElement("div");
+      const text = document.createElement("p");
+      bar.className = "pkl-capture-toolbar";
+      bar.setAttribute("role", "region");
+      bar.setAttribute("aria-label", "Controles do modo de captura");
+      text.textContent = "Modo de captura ativo. Tire o print da área abaixo.";
+      bar.append(text, exitButton);
+      return bar;
+    }
+
+    function buildCaptureIdentity_() {
+      const app = State.get().app || {};
+      const root = document.createElement("div");
+      const title = document.createElement("p");
+      root.className = "pkl-capture-identity";
+      root.setAttribute("aria-hidden", "true");
+
+      root.appendChild(
+        buildBrand_(
+          app.guildLogoUrl,
+          app.guildName || "Guild",
+          "pkl-capture-identity__guild",
+        ),
+      );
+
+      title.className = "pkl-capture-identity__title";
+      title.textContent = "Ranking semanal";
+      root.appendChild(title);
+
+      const game = document.createElement("div");
+      const label = document.createElement("span");
+      game.className = "pkl-capture-identity__game";
+      label.textContent = "Para jogadores de";
+      game.append(
+        label,
+        buildBrand_(
+          app.pokeLegendsLogoUrl,
+          "Poke Legends",
+          "pkl-capture-identity__pokelegends",
+        ),
+      );
+      root.appendChild(game);
+
+      return root;
+    }
+
+    function buildBrand_(url, name, className) {
+      if (typeof url === "string" && url.trim() !== "") {
+        const image = document.createElement("img");
+        image.className = className;
+        image.alt = name;
+        image.decoding = "async";
+        image.onerror = () => {
+          const fallback = document.createElement("strong");
+          fallback.className = className + " pkl-capture-identity__text-brand";
+          fallback.textContent = name;
+          image.replaceWith(fallback);
+        };
+        image.src = url.trim();
+        return image;
+      }
+
+      const text = document.createElement("strong");
+      text.className = className + " pkl-capture-identity__text-brand";
+      text.textContent = name;
+      return text;
+    }
+
+    async function loadSection_(
+      host,
+      action,
+      validate,
+      build,
+      label,
+      isRetry = false,
+    ) {
+      if (!host.isConnected) return;
+
+      host.setAttribute("aria-busy", "true");
+      host.tabIndex = -1;
+
+      const status = document.createElement("p");
+      status.className = "pkl-status";
+      status.setAttribute("role", "status");
+      status.textContent = `Carregando ${label}...`;
+      host.replaceChildren(status, UI.Skeleton({ lines: 2 }));
+
+      try {
+        const data = await ApiClient.requestPublic(action, {});
+        if (!host.isConnected) return;
+        validate(data);
+        host.replaceChildren(build(data));
+        if (isRetry) host.focus();
+      } catch (error) {
+        if (!host.isConnected) return;
+        const retry = UI.Button({
+          label: "Tentar novamente",
+          onClick: () =>
+            loadSection_(host, action, validate, build, label, true),
+        });
+        host.replaceChildren(
+          UI.EmptyState({
+            title: `Não foi possível carregar ${label}`,
+            description:
+              "Os dados estão indisponíveis no momento. Tente novamente em instantes.",
+            action: retry,
+          }).element,
+        );
+        if (isRetry) retry.focus();
+      } finally {
+        host.removeAttribute("aria-busy");
+      }
+    }
+
+    function buildUnavailable_(label) {
+      return UI.StatCard({
+        label,
+        value: "Indisponível",
+        supportingText: "Recarregue o ranking para tentar novamente.",
+      }).element;
+    }
+
+    function buildBank_(state) {
+      if (!state.initialized) {
+        return UI.StatCard({
+          label: "Guild Bank",
+          value: "Indisponível",
+          supportingText: "A Guild ainda não foi configurada.",
+        }).element;
+      }
+
+      return UI.StatCard({
+        label: "Guild Bank",
+        value: UtilitiesClient.formatGameMoney(state.bankBalance),
+        supportingText: "Saldo atual (estado atual da Guild).",
+      }).element;
+    }
+
+    function buildActiveMembers_(count) {
+      return UI.StatCard({
+        label: "Membros ativos",
+        value: String(count),
+        supportingText: "Estado atual da Guild.",
+      }).element;
+    }
+
+    function buildTopLevel_(members) {
+      const body = document.createElement("div");
+      body.className = "pkl-home-toplevel";
+
+      if (members.length === 0) {
+        body.appendChild(
+          UI.EmptyState({
+            title: "Nenhum membro ativo",
+            icon: "shield",
+          }).element,
+        );
+      } else {
+        const list = document.createElement("div");
+        list.className = "pkl-home-toplevel__list";
+        list.setAttribute("role", "table");
+        list.setAttribute("aria-label", "Ranking de nível dos membros");
+
+        const header = document.createElement("div");
+        header.className = "pkl-home-toplevel__header";
+        header.setAttribute("role", "row");
+        ["Pos.", "Nome", "Nível"].forEach(function (label) {
+          const cell = document.createElement("span");
+          cell.setAttribute("role", "columnheader");
+          cell.textContent = label;
+          header.appendChild(cell);
+        });
+        list.appendChild(header);
+
+        members.slice(0, 5).forEach((member, index) => {
+          const row = document.createElement("div");
+          const pos = document.createElement("div");
+          const name = document.createElement("div");
+          const meta = document.createElement("div");
+          row.className = "pkl-home-toplevel__item";
+          row.setAttribute("role", "row");
+          pos.className = "pkl-home-toplevel__position";
+          pos.setAttribute("role", "cell");
+          name.className = "pkl-home-toplevel__name";
+          name.setAttribute("role", "cell");
+          meta.className = "pkl-home-toplevel__meta";
+          meta.setAttribute("role", "cell");
+          pos.textContent = `${index + 1}°`;
+          name.textContent = member.name;
+          meta.textContent = String(member.level);
+          row.append(pos, name, meta);
+          list.appendChild(row);
+        });
+        body.appendChild(list);
+      }
+
+      return UI.Card({
+        title: "Ranking de nível",
+        description: "Top 5 membros ativos com maior nível.",
+        body,
+      }).element;
+    }
+
+    function buildObjective_(data) {
+      let body;
+
+      if (!data.initialized || data.objective === null) {
+        body = UI.EmptyState({
+          title: data.initialized
+            ? "Nenhum objetivo definido"
+            : "Objetivo indisponível",
+          description: data.initialized
+            ? "A administração ainda não selecionou uma habilidade."
+            : "A Guild ainda não foi configurada.",
+          icon: "shield",
+        }).element;
+      } else {
+        const objective = data.objective;
+        body = document.createElement("div");
+        body.className = "pkl-home-objective";
+
+        const name = document.createElement("p");
+        name.className = "pkl-home-objective__name";
+        name.textContent = `${objective.name} — nível ${objective.currentLevel} → ${objective.targetLevel}`;
+
+        const remaining = document.createElement("p");
+        remaining.className = "pkl-home-objective__remaining";
+        remaining.textContent = `Steps restantes: ${objective.remainingSteps}`;
+
+        body.append(
+          name,
+          UI.Progress({
+            label: "Progresso do objetivo",
+            value: objective.progressPercent,
+            max: 100,
+            valueText: `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(objective.progressPercent)}%`,
+          }).element,
+          remaining,
+        );
+      }
+
+      const link = UI.Button({
+        label: "Ver detalhes na Guild",
+        variant: "secondary",
+        onClick: () => Router.navigate("#/guild"),
+      });
+
+      return UI.Card({
+        title: "Objetivo atual",
+        body,
+        footer: link,
+      }).element;
+    }
+
+    function buildInstitutional_() {
+      const section = document.createElement("section");
+      const text = document.createElement("p");
+      section.className = "pkl-home-institutional";
+      text.textContent =
+        "PKL GuildBoard é uma ferramenta criada pela Guild Arkham para a comunidade de Poke Legends.";
+      section.appendChild(text);
+      return section;
+    }
+
+    function validateState_(state) {
+      if (!state || typeof state.initialized !== "boolean") {
+        throw new Error("Estado da Guild inválido.");
+      }
+      if (
+        state.initialized &&
+        (!Number.isInteger(state.bankBalance) || state.bankBalance < 0)
+      ) {
+        throw new Error("Guild Bank inválido.");
+      }
+    }
+
+    function validateObjective_(data) {
+      if (
+        !data ||
+        typeof data.initialized !== "boolean" ||
+        !Object.prototype.hasOwnProperty.call(data, "objective")
+      ) {
+        throw new Error("Objetivo público inválido.");
+      }
+      const o = data.objective;
+      if (
+        data.initialized &&
+        o !== null &&
+        (typeof o.name !== "string" ||
+          !o.name.trim() ||
+          !Number.isSafeInteger(o.currentLevel) ||
+          !Number.isSafeInteger(o.targetLevel) ||
+          !Number.isSafeInteger(o.remainingSteps) ||
+          o.remainingSteps < 1 ||
+          typeof o.progressPercent !== "number" ||
+          !Number.isFinite(o.progressPercent))
+      ) {
+        throw new Error("Objetivo público inválido.");
+      }
+    }
+
+    return {
+      render,
+    };
+  })();
+</script>

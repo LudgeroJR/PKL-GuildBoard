@@ -1,0 +1,424 @@
+<script>
+  const GuildView = (() => {
+    const SKILL_STATUS = Object.freeze({
+      IN_PROGRESS: {label: 'Em progresso', variant: 'info'},
+      AWAITING_LEVEL_CONFIG: {label: 'Preparando próximo nível', variant: 'warning'},
+      COMPLETED: {label: 'Concluída', variant: 'success'},
+    });
+
+    function render() {
+      const section = document.createElement('section');
+
+      section.className = 'pkl-view pkl-guild-view';
+      section.setAttribute('aria-labelledby', 'pkl-guild-title');
+
+      section.innerHTML = `
+        <h1 id="pkl-guild-title" class="pkl-view__title">Guild</h1>
+
+        <p class="pkl-view__description">
+          Acompanhe o nível, o saldo e a progressão das habilidades da Guild no Poke Legends.
+        </p>
+      `;
+
+      const content = document.createElement('div');
+      content.className = 'pkl-guild-view__content';
+      content.setAttribute('aria-live', 'polite');
+      content.tabIndex = -1;
+      section.appendChild(content);
+
+      // Cada render consulta o backend; respostas de páginas removidas são descartadas.
+      window.queueMicrotask(() => load_(content));
+      return section;
+    }
+
+    async function load_(content) {
+      if (!content.isConnected) return;
+      content.setAttribute('aria-busy', 'true');
+      const overview = document.createElement('div');
+      const objective = document.createElement('div');
+      const skills = document.createElement('div');
+      overview.className = 'pkl-guild-view__overview-host';
+      objective.className = 'pkl-guild-view__objective-host';
+      skills.className = 'pkl-guild-view__skills-host';
+      content.replaceChildren(overview, objective, skills);
+      await Promise.all([
+        loadSection_(overview, 'guild.getPublicState', validateState_, buildGuildState_, 'a visão geral da Guild'),
+        loadSection_(objective, 'guild.getPublicObjective', validateObjectiveState_, buildGuildObjective_, 'o objetivo atual'),
+        loadSection_(skills, 'skills.getPublicProgression', validateProgression_, buildSkillProgression_, 'as habilidades da Guild'),
+      ]);
+      content.removeAttribute('aria-busy');
+    }
+
+    async function loadSection_(host, action, validate, build, label, isRetry = false) {
+      if (!host.isConnected) return;
+      host.setAttribute('aria-busy', 'true');
+      host.tabIndex = -1;
+      const status = document.createElement('p');
+      status.className = 'pkl-status';
+      status.setAttribute('role', 'status');
+      status.textContent = `Carregando ${label}...`;
+      host.replaceChildren(status, UI.Skeleton({lines: 3}));
+
+      try {
+        const data = await ApiClient.requestPublic(action, {});
+        if (!host.isConnected) return;
+        validate(data);
+        host.replaceChildren(build(data));
+        if (isRetry) host.focus();
+      } catch (error) {
+        if (!host.isConnected) return;
+        const retry = UI.Button({label: 'Tentar novamente',
+          onClick: () => loadSection_(host, action, validate, build, label, true)});
+        host.replaceChildren(UI.EmptyState({
+          title: `Não foi possível carregar ${label}`,
+          description: 'Os dados estão indisponíveis no momento. Tente novamente em instantes.',
+          action: retry,
+        }).element);
+        if (isRetry) retry.focus();
+      } finally {
+        host.removeAttribute('aria-busy');
+      }
+    }
+
+    function buildGuildState_(state) {
+      const section = document.createElement('section');
+      const title = document.createElement('h2');
+      section.className = 'pkl-guild-view__overview';
+      title.className = 'pkl-guild-view__section-title';
+      title.textContent = 'Visão geral';
+      section.appendChild(title);
+
+      let body;
+      if (!state.initialized) {
+        body = UI.EmptyState({
+          title: 'A Guild ainda não foi configurada',
+          description: 'O nível e o Guild Bank aparecerão aqui após a configuração pela administração.',
+          icon: 'shield',
+        }).element;
+      } else {
+        body = document.createElement('div');
+        body.className = 'pkl-guild-view__stats';
+        const integerFormat = new Intl.NumberFormat('pt-BR', {maximumFractionDigits: 0});
+        body.append(
+          UI.StatCard({label: 'Nível da Guild',
+            value: integerFormat.format(state.level),
+            supportingText: 'Nível atual da Guild.'}).element,
+          UI.StatCard({label: 'Guild Bank',
+            value: UtilitiesClient.formatGameMoney(state.bankBalance),
+            supportingText: 'Saldo atual sincronizado com o jogo.'}).element,
+          UI.StatCard({label: 'Ranking',
+            value: `Hoje: ${integerFormat.format(state.rankingHoje)}`,
+            supportingText: 'Posição da Guild no ranking.'}).element
+        );
+      }
+      section.appendChild(body);
+      return section;
+    }
+
+    function buildGuildObjective_(data) {
+      const section = document.createElement('section');
+      const heading = document.createElement('div');
+      const title = document.createElement('h2');
+      const description = document.createElement('p');
+      section.className = 'pkl-guild-objective';
+      heading.className = 'pkl-guild-objective__heading';
+      title.className = 'pkl-guild-view__section-title';
+      title.textContent = 'Objetivo atual';
+      description.className = 'pkl-guild-objective__description';
+      description.textContent = 'Acompanhe o próximo avanço priorizado pela Guild.';
+      heading.append(title, description);
+      section.appendChild(heading);
+
+      if (!data.initialized) {
+        section.appendChild(UI.EmptyState({
+          title: 'Objetivo ainda indisponível',
+          description: 'A Guild precisa ser configurada antes de definir um objetivo.',
+          icon: 'shield',
+        }).element);
+        return section;
+      }
+
+      if (data.objective === null) {
+        section.appendChild(UI.EmptyState({
+          title: 'Nenhum objetivo definido',
+          description: 'A administração ainda não selecionou uma habilidade como objetivo atual.',
+          icon: 'shield',
+        }).element);
+        return section;
+      }
+
+      const objective = data.objective;
+      if (objective.status !== 'IN_PROGRESS') {
+        const messages = {
+          COMPLETED: ['Habilidade concluída', 'A habilidade selecionada já atingiu o nível máximo. A seleção foi preservada; a administração pode escolher outro objetivo.'],
+          AWAITING_LEVEL_CONFIG: ['Próximo nível em preparação', 'A habilidade selecionada aguarda a configuração do próximo nível. A seleção foi preservada.'],
+          LOCKED: ['Habilidade bloqueada', 'Os pré-requisitos atuais não permitem avançar nesta habilidade. A seleção foi preservada.'],
+          AVAILABLE: ['Habilidade sem progresso', 'A habilidade selecionada ainda não possui progresso iniciado. A seleção foi preservada.'],
+          INVALID_REFERENCE: ['Referência de objetivo inválida', 'A habilidade selecionada não existe mais no catálogo. A seleção foi preservada para revisão administrativa.'],
+        };
+        const [titleText, descriptionText] = messages[objective.status];
+        section.appendChild(UI.EmptyState({
+          title: titleText,
+          description: descriptionText,
+          icon: 'shield',
+        }).element);
+        return section;
+      }
+
+      const body = document.createElement('div');
+      body.className = 'pkl-guild-objective__body';
+      const summary = document.createElement('div');
+      summary.className = 'pkl-guild-objective__summary';
+      const nameGroup = document.createElement('div');
+      const name = document.createElement('h3');
+      name.className = 'pkl-guild-objective__name';
+      name.textContent = objective.name;
+      const level = document.createElement('p');
+      level.className = 'pkl-guild-objective__level';
+      level.textContent = `Nível ${objective.currentLevel} → ${objective.targetLevel}`;
+      nameGroup.append(name, level);
+      summary.append(nameGroup, UI.Badge({label: 'Em progresso', variant: 'info'}));
+
+      const buff = document.createElement('p');
+      buff.className = 'pkl-guild-objective__buff';
+      buff.textContent = `Próximo buff — nível ${objective.nextBuff.level}: ${objective.nextBuff.description}`;
+      const progress = UI.Progress({
+        label: 'Progresso do objetivo',
+        value: objective.progressPercent,
+        max: 100,
+        valueText: `${formatObjectiveDecimal_(objective.progressPercent, 1)}% — ${objective.currentStep} de ${objective.totalSteps} steps`,
+      });
+      const metrics = document.createElement('div');
+      metrics.className = 'pkl-guild-objective__metrics';
+      [
+        ['Steps restantes', String(objective.remainingSteps)],
+      ].forEach(([label, value]) => {
+        metrics.appendChild(UI.StatCard({label, value}).element);
+      });
+
+      body.append(summary, buff, progress.element, metrics);
+      section.appendChild(body);
+      return section;
+    }
+
+    function formatObjectiveDecimal_(value, maximumFractionDigits) {
+      return new Intl.NumberFormat('pt-BR', {
+        maximumFractionDigits,
+      }).format(value);
+    }
+
+    function buildSkillProgression_(progression) {
+      const section = document.createElement('section');
+      const heading = document.createElement('div');
+      const title = document.createElement('h2');
+      const description = document.createElement('p');
+      section.className = 'pkl-guild-skills';
+      heading.className = 'pkl-guild-skills__header';
+      title.className = 'pkl-guild-view__section-title';
+      title.textContent = 'Habilidades da Guild';
+      description.className = 'pkl-guild-skills__description';
+      description.textContent = 'Acompanhe habilidades em desenvolvimento e conquistas da Guild.';
+      heading.append(title, description);
+      section.appendChild(heading);
+
+      if (progression.length === 0) {
+        section.appendChild(UI.EmptyState({
+          title: 'Nenhuma habilidade em progressão',
+          description: 'As habilidades aparecerão após serem ativadas pela administração.',
+          icon: 'book-open',
+        }).element);
+        return section;
+      }
+
+      const grid = document.createElement('div');
+      grid.className = 'pkl-guild-skills__grid';
+      progression.forEach((skill) => grid.appendChild(buildSkillCard_(skill)));
+      section.appendChild(grid);
+      return section;
+    }
+
+    function buildSkillCard_(skill) {
+      const body = document.createElement('div');
+      const summary = document.createElement('div');
+      const level = document.createElement('p');
+      body.className = 'pkl-guild-skill-card__body';
+      summary.className = 'pkl-guild-skill-card__summary';
+      level.className = 'pkl-guild-skill-card__level';
+      level.textContent = `Nível ${skill.currentLevel} de ${skill.totalLevels}`;
+      summary.append(level, UI.Badge(SKILL_STATUS[skill.status]));
+      body.appendChild(summary);
+
+      if (skill.status === 'IN_PROGRESS') {
+        body.appendChild(UI.Progress({
+          label: `Steps: ${skill.currentStep} de ${skill.totalSteps}`,
+          value: skill.currentStep,
+          max: skill.totalSteps,
+        }).element);
+        body.appendChild(info_('Próximo buff',
+          `Nível ${skill.nextBuff.level} — ${skill.nextBuff.description}`));
+      } else if (skill.status === 'AWAITING_LEVEL_CONFIG') {
+        body.appendChild(info_(
+          'Próximo passo',
+          `O nível ${skill.currentLevel} foi conquistado. A configuração do próximo nível está em preparação.`,
+        ));
+        body.appendChild(info_('Próximo buff',
+          `Nível ${skill.nextBuff.level} — ${skill.nextBuff.description}`));
+      } else {
+        const buffs = document.createElement('ul');
+        buffs.className = 'pkl-guild-skill-card__buffs';
+        skill.earnedBuffs.forEach((buff) => {
+          const item = document.createElement('li');
+          item.textContent = `Nível ${buff.level} — ${buff.description}`;
+          buffs.appendChild(item);
+        });
+        body.appendChild(info_('Buffs conquistados', buffs));
+      }
+
+      return UI.Card({
+        title: skill.name,
+        body,
+        className: 'pkl-guild-skill-card',
+      }).element;
+    }
+
+    function info_(labelText, content) {
+      const group = document.createElement('div');
+      const label = document.createElement('span');
+      group.className = 'pkl-guild-skill-card__info';
+      label.className = 'pkl-guild-skill-card__label';
+      label.textContent = labelText;
+      group.appendChild(label);
+      if (content instanceof Node) {
+        group.appendChild(content);
+      } else {
+        const value = document.createElement('p');
+        value.textContent = content;
+        group.appendChild(value);
+      }
+      return group;
+    }
+
+    function validateProgression_(progression) {
+      if (!Array.isArray(progression)) {
+        throw new Error('Progressão pública inválida.');
+      }
+      const ids = Object.create(null);
+      progression.forEach((skill) => {
+        if (!skill || typeof skill.skillId !== 'string' || ids[skill.skillId] ||
+            typeof skill.name !== 'string' || !skill.name.trim() ||
+            !SKILL_STATUS[skill.status] ||
+            !Number.isSafeInteger(skill.totalLevels) || skill.totalLevels < 1 ||
+            !Number.isSafeInteger(skill.currentLevel) || skill.currentLevel < 0 ||
+            !Array.isArray(skill.earnedBuffs)) {
+          throw new Error('Habilidade pública inválida.');
+        }
+        ids[skill.skillId] = true;
+        if (skill.currentLevel > skill.totalLevels ||
+            skill.earnedBuffs.length !== skill.currentLevel ||
+            skill.earnedBuffs.some((buff, index) =>
+              !buff || buff.level !== index + 1 ||
+              typeof buff.description !== 'string' || !buff.description.trim())) {
+          throw new Error('Buffs públicos inválidos.');
+        }
+        if (skill.nextBuff !== null &&
+            (!skill.nextBuff || skill.nextBuff.level !== skill.currentLevel + 1 ||
+              typeof skill.nextBuff.description !== 'string' ||
+              !skill.nextBuff.description.trim())) {
+          throw new Error('Próximo buff público inválido.');
+        }
+        if (skill.status === 'IN_PROGRESS') {
+          if (!Number.isSafeInteger(skill.currentStep) || skill.currentStep < 0 ||
+              !Number.isSafeInteger(skill.totalSteps) || skill.totalSteps < 1 ||
+              skill.currentStep >= skill.totalSteps || !skill.nextBuff) {
+            throw new Error('Habilidade em progresso inválida.');
+          }
+        } else if (skill.currentStep !== 0 || skill.totalSteps !== null) {
+          throw new Error('Habilidade pública finalizada/configurável inválida.');
+        }
+        if (skill.status === 'AWAITING_LEVEL_CONFIG' && !skill.nextBuff) {
+          throw new Error('Próximo buff ausente.');
+        }
+        if (skill.status === 'COMPLETED' &&
+            (skill.currentLevel !== skill.totalLevels || skill.nextBuff !== null ||
+              skill.earnedBuffs.length !== skill.totalLevels)) {
+          throw new Error('Conclusão pública inválida.');
+        }
+      });
+      return progression;
+    }
+
+    function validateObjectiveState_(data) {
+      if (!data || typeof data !== 'object' ||
+          typeof data.initialized !== 'boolean' ||
+          !Object.prototype.hasOwnProperty.call(data, 'objective')) {
+        throw new Error('Objetivo público inválido.');
+      }
+      const allowedEnvelope = ['initialized', 'objective'];
+      if (Object.keys(data).some(key => !allowedEnvelope.includes(key))) {
+        throw new Error('Objetivo público expõe dados não permitidos.');
+      }
+      if (!data.initialized) {
+        if (data.objective !== null) throw new Error('Objetivo vazio inválido.');
+        return;
+      }
+      if (data.objective === null) return;
+      const objective = data.objective;
+      if (objective.status !== 'IN_PROGRESS') {
+        const allowedStatuses = [
+          'COMPLETED', 'AWAITING_LEVEL_CONFIG', 'LOCKED', 'AVAILABLE',
+          'INVALID_REFERENCE',
+        ];
+        if (!allowedStatuses.includes(objective.status) ||
+            (objective.status !== 'INVALID_REFERENCE' &&
+              (typeof objective.skillId !== 'string' ||
+                typeof objective.name !== 'string' ||
+                !objective.name.trim() ||
+                !Number.isSafeInteger(objective.currentLevel) ||
+                objective.currentLevel < 0))) {
+          throw new Error('Estado público do objetivo inválido.');
+        }
+        return;
+      }
+      const integerFields = [
+        'currentLevel', 'targetLevel', 'currentStep', 'totalSteps',
+        'remainingSteps',
+      ];
+      if (typeof objective.skillId !== 'string' ||
+          typeof objective.name !== 'string' || !objective.name.trim() ||
+          objective.status !== 'IN_PROGRESS' ||
+          integerFields.some(field =>
+            !Number.isSafeInteger(objective[field]) || objective[field] < 0) ||
+          objective.targetLevel !== objective.currentLevel + 1 ||
+          objective.totalSteps < 1 || objective.currentStep >= objective.totalSteps ||
+          objective.remainingSteps !== objective.totalSteps - objective.currentStep ||
+          typeof objective.progressPercent !== 'number' ||
+          !Number.isFinite(objective.progressPercent) ||
+          objective.progressPercent < 0 || objective.progressPercent >= 100 ||
+          !objective.nextBuff || objective.nextBuff.level !== objective.targetLevel ||
+          typeof objective.nextBuff.description !== 'string' ||
+          !objective.nextBuff.description.trim()) {
+        throw new Error('Dados públicos do objetivo inválidos.');
+      }
+    }
+
+    function validateState_(state) {
+      const numericFields = ['level', 'bankBalance', 'xpTotal', 'xpProximoNivel', 'vagas', 'rankingHoje', 'rankingOntem'];
+      if (!state || typeof state.initialized !== 'boolean') {
+        throw new Error('Estado da Guild inválido.');
+      }
+      if (!state.initialized) {
+        if (numericFields.some(field => state[field] !== null) || state.updatedAt !== null) {
+          throw new Error('Estado vazio inválido.');
+        }
+        return;
+      }
+      if (numericFields.some(field => !Number.isInteger(state[field]) || state[field] < 0)) {
+        throw new Error('Valores da Guild inválidos.');
+      }
+    }
+
+    return {
+      render
+    };
+  })();
+</script>

@@ -1,0 +1,535 @@
+<script>
+  const AdminView = (() => {
+    let renderGeneration = 0;
+
+    function render() {
+      const section = document.createElement("section");
+
+      const generation = ++renderGeneration;
+
+      section.className = "pkl-view pkl-admin-view";
+
+      section.setAttribute("aria-labelledby", "pkl-admin-title");
+
+      const auth = State.get().auth;
+
+      if (auth.sessionToken) {
+        renderSessionValidation_(section);
+
+        validateRestoredSession_(section, generation, auth.sessionToken);
+
+        return section;
+      }
+
+      renderLogin_(section, generation);
+
+      return section;
+    }
+
+    function renderLogin_(section, generation, noticeMessage) {
+      section.replaceChildren();
+
+      const heading = document.createElement("div");
+
+      heading.innerHTML = `
+        <h1
+          id="pkl-admin-title"
+          class="pkl-view__title"
+        >
+          Administração
+        </h1>
+
+        <p class="pkl-view__description">
+          Acesso restrito à liderança da Guild.
+        </p>
+      `;
+
+      section.appendChild(heading);
+
+      if (noticeMessage) {
+        const notice = document.createElement("p");
+
+        notice.className = "pkl-view__notice";
+
+        notice.setAttribute("role", "status");
+
+        notice.setAttribute("aria-live", "polite");
+
+        notice.textContent = noticeMessage;
+
+        section.appendChild(notice);
+      }
+
+      const form = document.createElement("form");
+
+      form.className = "pkl-admin-login__form";
+
+      form.noValidate = true;
+
+      const passwordField = UI.Input({
+        label: "Senha administrativa",
+        name: "adminPassword",
+        type: "password",
+        autocomplete: "current-password",
+        required: true,
+        helperText: "Use a senha administrativa compartilhada da liderança.",
+      });
+
+      const submitButton = UI.Button({
+        label: "Entrar na administração",
+        variant: "primary",
+        type: "submit",
+      });
+
+      const actions = document.createElement("div");
+
+      actions.className = "pkl-admin-login__actions";
+
+      actions.appendChild(submitButton);
+
+      form.appendChild(passwordField.element);
+
+      form.appendChild(actions);
+
+      const card = UI.Card({
+        title: "Acesso administrativo",
+        description: "Informe a credencial para continuar.",
+        body: form,
+        raised: true,
+        className: "pkl-admin-login__card",
+      });
+
+      section.appendChild(card.element);
+
+      let isSubmitting = false;
+
+      passwordField.input.addEventListener("input", () => {
+        passwordField.setError(null);
+      });
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+
+        if (isSubmitting) {
+          return;
+        }
+
+        const password = passwordField.input.value;
+
+        if (password.length === 0) {
+          passwordField.setError("Informe a senha administrativa.");
+
+          passwordField.input.focus();
+          return;
+        }
+
+        isSubmitting = true;
+
+        passwordField.setError(null);
+
+        UI.setButtonLoading(submitButton, true, "Entrando...");
+
+        try {
+          const session = await ApiClient.requestPublic("auth.login", {
+            password,
+          });
+
+          passwordField.input.value = "";
+
+          State.setAuth({
+            sessionToken: session.sessionToken,
+            expiresAt: session.expiresAt,
+          });
+
+          if (generation !== renderGeneration) {
+            return;
+          }
+
+          renderAuthenticatedShell_(section, generation);
+        } catch (error) {
+          if (generation !== renderGeneration) {
+            return;
+          }
+
+          if (error && error.code === "FORBIDDEN") {
+            passwordField.setError(
+              "Não foi possível autenticar com a credencial informada.",
+            );
+
+            passwordField.input.select();
+            return;
+          }
+
+          if (error && error.code === "VALIDATION_ERROR") {
+            passwordField.setError("Informe uma senha administrativa válida.");
+
+            passwordField.input.focus();
+            return;
+          }
+
+          UI.Toast({
+            variant: "danger",
+            title: "Falha no acesso",
+            message: "Não foi possível autenticar agora. Tente novamente.",
+          });
+
+          passwordField.input.focus();
+        } finally {
+          isSubmitting = false;
+
+          UI.setButtonLoading(submitButton, false);
+        }
+      });
+
+      window.queueMicrotask(() => {
+        if (
+          generation === renderGeneration &&
+          document.contains(passwordField.input)
+        ) {
+          passwordField.input.focus();
+        }
+      });
+    }
+
+    function renderSessionValidation_(section) {
+      section.innerHTML = `
+        <h1
+          id="pkl-admin-title"
+          class="pkl-view__title"
+        >
+          Administração
+        </h1>
+
+        <div
+          class="pkl-status"
+          role="status"
+          aria-live="polite"
+        >
+          Validando sessão administrativa...
+        </div>
+      `;
+    }
+
+    async function validateRestoredSession_(section, generation, sessionToken) {
+      try {
+        const session = await ApiClient.request("auth.session", {});
+
+        if (generation !== renderGeneration) {
+          return;
+        }
+
+        State.setAuth({
+          sessionToken,
+          expiresAt: session.expiresAt,
+        });
+
+        renderAuthenticatedShell_(section, generation);
+      } catch (error) {
+        if (generation !== renderGeneration) {
+          return;
+        }
+
+        if (error && error.code === "AUTH_REQUIRED") {
+          renderLogin_(
+            section,
+            generation,
+            "Sua sessão administrativa expirou ou não é mais válida. Entre novamente para continuar.",
+          );
+
+          return;
+        }
+
+        renderLogin_(section, generation);
+
+        UI.Toast({
+          variant: "danger",
+          title: "Falha na validação",
+          message:
+            "Não foi possível validar a sessão administrativa. Tente novamente.",
+        });
+      }
+    }
+
+    function renderAuthenticatedShell_(section, generation) {
+      section.replaceChildren();
+
+      const header = document.createElement("div");
+
+      header.className = "pkl-admin-shell__header";
+
+      const heading = document.createElement("div");
+
+      heading.className = "pkl-admin-shell__heading";
+
+      heading.innerHTML = `
+    <h1
+      id="pkl-admin-title"
+      class="pkl-view__title"
+    >
+      Administração
+    </h1>
+
+    <p class="pkl-view__description">
+      Área administrativa da Guild.
+    </p>
+  `;
+
+      const logoutButton = UI.Button({
+        label: "Sair",
+        variant: "danger",
+        type: "button",
+      });
+
+      header.appendChild(heading);
+
+      header.appendChild(logoutButton);
+
+      const handleAdminAuthRequired = () => {
+        if (generation !== renderGeneration) {
+          return;
+        }
+
+        renderLogin_(
+          section,
+          generation,
+          "Sua sessão administrativa expirou ou não é mais válida. Entre novamente para continuar.",
+        );
+      };
+
+      const memberAdministration = MemberAdminView.render({
+        onAuthRequired: handleAdminAuthRequired,
+      });
+      const contributionAdministration = ContributionAdminView.render({
+        onAuthRequired: handleAdminAuthRequired,
+      });
+
+      const guildAdministration = GuildAdminView.render({
+        onAuthRequired: handleAdminAuthRequired,
+      });
+      const skillAdministration = SkillAdminView.render({
+        onAuthRequired: handleAdminAuthRequired,
+      });
+
+      const tabs = UI.Tabs({
+        ariaLabel: "Áreas administrativas",
+        onChange(index) {
+          if (index === 1) GuildAdminView.refresh(guildAdministration);
+          if (index === 2) SkillProgressionAdminView.refresh(
+            skillAdministration.querySelector('.pkl-skill-progression'),
+          );
+          if (index === 3) ContributionAdminView.refresh(contributionAdministration);
+        },
+
+        tabs: [
+          {
+            label: "Membros",
+
+            content: memberAdministration,
+          },
+
+          {
+            label: "Guild",
+            content: guildAdministration,
+          },
+
+          {
+            label: "Habilidades",
+            content: skillAdministration,
+          },
+
+          {
+            label: "Contribuições / Tasks",
+            content: contributionAdministration,
+          },
+
+          {
+            label: "Podex",
+            content: PodexAdminView.render({
+              onAuthRequired: handleAdminAuthRequired,
+            }),
+          },
+        ],
+      });
+
+      section.appendChild(header);
+
+      const settings = buildAdminSettings_(generation, section);
+      section.appendChild(settings);
+
+      section.appendChild(tabs.element);
+
+      let isLoggingOut = false;
+
+      logoutButton.addEventListener("click", async () => {
+        if (isLoggingOut) {
+          return;
+        }
+
+        isLoggingOut = true;
+
+        UI.setButtonLoading(logoutButton, true, "Saindo...");
+
+        try {
+          await ApiClient.request("auth.logout", {});
+
+          State.clearAuth();
+
+          if (generation !== renderGeneration) {
+            return;
+          }
+
+          renderLogin_(section, generation, "Sessão administrativa encerrada.");
+        } catch (error) {
+          if (generation !== renderGeneration) {
+            return;
+          }
+
+          if (error && error.code === "AUTH_REQUIRED") {
+            renderLogin_(
+              section,
+              generation,
+              "Sua sessão administrativa não é mais válida. Entre novamente para continuar.",
+            );
+
+            return;
+          }
+
+          UI.Toast({
+            variant: "danger",
+            title: "Falha ao sair",
+            message:
+              "Não foi possível encerrar a sessão agora. Tente novamente.",
+          });
+        } finally {
+          isLoggingOut = false;
+
+          if (document.contains(logoutButton)) {
+            UI.setButtonLoading(logoutButton, false);
+          }
+        }
+      });
+    }
+
+    function buildAdminSettings_(generation, section) {
+      const root = document.createElement("section");
+      root.className = "pkl-admin-settings";
+      root.setAttribute("aria-labelledby", "pkl-admin-settings-title");
+
+      const title = document.createElement("h2");
+      title.id = "pkl-admin-settings-title";
+      title.className = "pkl-guild-view__section-title";
+      title.textContent = "Configurações rápidas";
+      root.appendChild(title);
+
+      const passwordField = UI.Input({
+        label: "Nova senha administrativa",
+        name: "newAdminPassword",
+        type: "password",
+        autocomplete: "new-password",
+        helperText: "Use pelo menos 8 caracteres.",
+      });
+      const passwordConfirmField = UI.Input({
+        label: "Confirmar nova senha",
+        name: "newAdminPasswordConfirmation",
+        type: "password",
+        autocomplete: "new-password",
+      });
+      const passwordButton = UI.Button({
+        label: "Trocar senha",
+        variant: "secondary",
+        type: "submit",
+      });
+      const passwordForm = document.createElement("form");
+      passwordForm.className = "pkl-admin-settings__form";
+      passwordForm.append(passwordField.element, passwordConfirmField.element, passwordButton);
+      passwordForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const value = passwordField.input.value;
+        if (value.length < 8) {
+          passwordField.setError("Use pelo menos 8 caracteres.");
+          return;
+        }
+        if (value !== passwordConfirmField.input.value) {
+          passwordConfirmField.setError("As senhas não conferem.");
+          return;
+        }
+        UI.setButtonLoading(passwordButton, true, "Salvando...");
+        try {
+          await ApiClient.request("auth.changePassword", {newPassword: value});
+          passwordField.input.value = "";
+          passwordConfirmField.input.value = "";
+          UI.Toast({variant: "success", title: "Senha atualizada", message: "A nova senha já pode ser usada no próximo acesso."});
+        } catch (error) {
+          if (error && error.code === "AUTH_REQUIRED") {
+            State.clearAuth();
+            renderLogin_(section, generation, "Sua sessão expirou. Entre novamente para continuar.");
+            return;
+          }
+          UI.Toast({variant: "danger", title: "Falha ao trocar senha", message: "Não foi possível atualizar a senha."});
+        } finally {
+          UI.setButtonLoading(passwordButton, false);
+        }
+      });
+
+      const targetField = UI.Input({
+        label: "Meta diária da Guild",
+        name: "dailyTarget",
+        type: "number",
+        min: "0",
+        step: "1",
+        helperText: "Valor global usado no cálculo das metas semanais.",
+      });
+      const targetButton = UI.Button({
+        label: "Salvar meta",
+        variant: "secondary",
+        type: "submit",
+      });
+      const targetForm = document.createElement("form");
+      targetForm.className = "pkl-admin-settings__form";
+      targetForm.append(targetField.element, targetButton);
+      targetForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const value = Number(targetField.input.value);
+        if (!Number.isSafeInteger(value) || value < 0) {
+          targetField.setError("Informe um número inteiro maior ou igual a zero.");
+          return;
+        }
+        UI.setButtonLoading(targetButton, true, "Salvando...");
+        try {
+          const result = await ApiClient.request("contributions.setDailyTarget", {dailyTarget: value});
+          targetField.input.value = String(result.dailyTarget);
+          UI.Toast({variant: "success", title: "Meta atualizada", message: "A nova meta será usada nos próximos cálculos."});
+        } catch (error) {
+          if (error && error.code === "AUTH_REQUIRED") {
+            State.clearAuth();
+            renderLogin_(section, generation, "Sua sessão expirou. Entre novamente para continuar.");
+            return;
+          }
+          UI.Toast({variant: "danger", title: "Falha ao salvar meta", message: "Não foi possível atualizar a Meta Diária."});
+        } finally {
+          UI.setButtonLoading(targetButton, false);
+        }
+      });
+
+      const cards = document.createElement("div");
+      cards.className = "pkl-admin-settings__grid";
+      cards.append(
+        UI.Card({title: "Credencial", description: "Altere a senha usada pela liderança.", body: passwordForm}).element,
+        UI.Card({title: "Meta diária", description: "Edite a configuração sem abrir a planilha.", body: targetForm}).element,
+      );
+      root.appendChild(cards);
+
+      ApiClient.request("contributions.getCurrentWeek", {}).then((week) => {
+        if (targetField.input.isConnected && week && Number.isInteger(week.dailyTarget)) {
+          targetField.input.value = String(week.dailyTarget);
+        }
+      }).catch(() => {});
+
+      return root;
+    }
+
+    return {
+      render,
+    };
+  })();
+</script>

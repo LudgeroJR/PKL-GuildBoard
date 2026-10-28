@@ -1,0 +1,2174 @@
+<script>
+  const UI = (() => {
+    const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+
+    /*
+     * Iconografia: Lucide Icons
+     * Licença: ISC
+     * Apenas os SVG paths necessários são incorporados localmente.
+     */
+
+    const ICONS = Object.freeze({
+      house: Object.freeze([
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8",
+          }),
+        }),
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z",
+          }),
+        }),
+      ]),
+
+      shield: Object.freeze([
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z",
+          }),
+        }),
+      ]),
+
+      "book-open": Object.freeze([
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "M12 7v14",
+          }),
+        }),
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z",
+          }),
+        }),
+      ]),
+      camera: Object.freeze([
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z",
+          }),
+        }),
+        Object.freeze({
+          tag: "circle",
+          attributes: Object.freeze({ cx: "12", cy: "13", r: "3" }),
+        }),
+      ]),
+      x: Object.freeze([
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "M18 6 6 18",
+          }),
+        }),
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "m6 6 12 12",
+          }),
+        }),
+      ]),
+
+      "chevron-down": Object.freeze([
+        Object.freeze({
+          tag: "path",
+          attributes: Object.freeze({
+            d: "m6 9 6 6 6-6",
+          }),
+        }),
+      ]),
+    });
+
+    const BUTTON_VARIANTS = Object.freeze([
+      "primary",
+      "secondary",
+      "ghost",
+      "danger",
+    ]);
+
+    const BADGE_VARIANTS = Object.freeze([
+      "neutral",
+      "success",
+      "warning",
+      "danger",
+      "info",
+    ]);
+
+    const PROGRESS_VARIANTS = Object.freeze([
+      "primary",
+      "success",
+      "warning",
+      "danger",
+    ]);
+
+    const TOAST_VARIANTS = Object.freeze([
+      "neutral",
+      "success",
+      "warning",
+      "danger",
+      "info",
+    ]);
+
+    const TOAST_LABELS = Object.freeze({
+      neutral: "Notificação",
+      success: "Sucesso",
+      warning: "Atenção",
+      danger: "Erro",
+      info: "Informação",
+    });
+
+    let activeModal = null;
+    let toastContainer = null;
+
+    const FOCUSABLE_SELECTOR = [
+      "a[href]",
+      "button:not([disabled])",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(",");
+    /* ========================================================================
+       Icon
+       ======================================================================== */
+
+    function icon(name, options = {}) {
+      const definition = ICONS[name];
+
+      if (!definition) {
+        throw new Error(`Ícone desconhecido: ${name}.`);
+      }
+
+      const svg = document.createElementNS(SVG_NAMESPACE, "svg");
+
+      svg.setAttribute("viewBox", "0 0 24 24");
+
+      svg.setAttribute("fill", "none");
+      svg.setAttribute("stroke", "currentColor");
+
+      svg.setAttribute("stroke-width", "2");
+
+      svg.setAttribute("stroke-linecap", "round");
+
+      svg.setAttribute("stroke-linejoin", "round");
+
+      svg.setAttribute("focusable", "false");
+
+      const classes = ["pkl-icon"];
+
+      if (
+        typeof options.className === "string" &&
+        options.className.trim() !== ""
+      ) {
+        classes.push(options.className.trim());
+      }
+
+      svg.setAttribute("class", classes.join(" "));
+
+      if (typeof options.label === "string" && options.label.trim() !== "") {
+        svg.setAttribute("role", "img");
+
+        svg.setAttribute("aria-label", options.label.trim());
+      } else {
+        svg.setAttribute("aria-hidden", "true");
+      }
+
+      definition.forEach((nodeDefinition) => {
+        const node = document.createElementNS(
+          SVG_NAMESPACE,
+          nodeDefinition.tag,
+        );
+
+        Object.entries(nodeDefinition.attributes).forEach(
+          ([attribute, value]) => {
+            node.setAttribute(attribute, value);
+          },
+        );
+
+        svg.appendChild(node);
+      });
+
+      return svg;
+    }
+
+    function hydrateIcons(root = document) {
+      if (!root || typeof root.querySelectorAll !== "function") {
+        return;
+      }
+
+      root.querySelectorAll("[data-pkl-icon]").forEach((host) => {
+        const iconName = host.getAttribute("data-pkl-icon");
+
+        if (!iconName) {
+          return;
+        }
+
+        host.replaceChildren(icon(iconName));
+      });
+    }
+
+    /* ========================================================================
+       Button
+       ======================================================================== */
+
+    function button(options = {}) {
+      const label = normalizeRequiredText_(options.label, "label");
+
+      const variant = normalizeButtonVariant_(options.variant);
+
+      const element = document.createElement("button");
+
+      element.type =
+        typeof options.type === "string" && options.type.trim() !== ""
+          ? options.type.trim()
+          : "button";
+
+      element.className = `pkl-button pkl-button--${variant}`;
+
+      if (
+        typeof options.className === "string" &&
+        options.className.trim() !== ""
+      ) {
+        element.classList.add(...options.className.trim().split(/\s+/));
+      }
+
+      const spinner = document.createElement("span");
+
+      spinner.className = "pkl-button__spinner";
+
+      spinner.setAttribute("aria-hidden", "true");
+
+      const labelElement = document.createElement("span");
+
+      labelElement.className = "pkl-button__label";
+
+      labelElement.textContent = label;
+
+      if (typeof options.icon === "string" && options.icon.trim() !== "") {
+        element.appendChild(
+          icon(options.icon.trim(), {
+            className: "pkl-button__icon",
+          }),
+        );
+      }
+
+      element.appendChild(spinner);
+      element.appendChild(labelElement);
+
+      if (
+        typeof options.ariaLabel === "string" &&
+        options.ariaLabel.trim() !== ""
+      ) {
+        element.setAttribute("aria-label", options.ariaLabel.trim());
+      }
+
+      element.disabled = options.disabled === true;
+
+      if (typeof options.onClick === "function") {
+        element.addEventListener("click", options.onClick);
+      }
+
+      if (options.loading === true) {
+        setButtonLoading(element, true, options.loadingLabel);
+      }
+
+      return element;
+    }
+
+    function setButtonLoading(element, isLoading, loadingLabel) {
+      if (
+        !(element instanceof HTMLButtonElement) ||
+        !element.classList.contains("pkl-button")
+      ) {
+        throw new Error("Button inválido para alteração de loading.");
+      }
+
+      const labelElement = element.querySelector(".pkl-button__label");
+
+      if (!labelElement) {
+        throw new Error("Label do Button não encontrado.");
+      }
+
+      if (
+        isLoading !== true &&
+        !Object.prototype.hasOwnProperty.call(
+          element.dataset,
+          "pklOriginalLabel",
+        )
+      ) {
+        element.classList.remove("is-loading");
+        element.removeAttribute("aria-busy");
+        return;
+      }
+
+      if (isLoading === true) {
+        if (
+          !Object.prototype.hasOwnProperty.call(
+            element.dataset,
+            "pklOriginalLabel",
+          )
+        ) {
+          element.dataset.pklOriginalLabel = labelElement.textContent || "";
+
+          element.dataset.pklDisabledBeforeLoading = element.disabled
+            ? "true"
+            : "false";
+        }
+
+        labelElement.textContent =
+          typeof loadingLabel === "string" && loadingLabel.trim() !== ""
+            ? loadingLabel.trim()
+            : "Carregando...";
+
+        element.classList.add("is-loading");
+
+        element.setAttribute("aria-busy", "true");
+
+        element.disabled = true;
+        return;
+      }
+
+      if (
+        Object.prototype.hasOwnProperty.call(
+          element.dataset,
+          "pklOriginalLabel",
+        )
+      ) {
+        labelElement.textContent = element.dataset.pklOriginalLabel;
+      }
+
+      const wasDisabled = element.dataset.pklDisabledBeforeLoading === "true";
+
+      element.classList.remove("is-loading");
+
+      element.removeAttribute("aria-busy");
+
+      element.disabled = wasDisabled;
+
+      delete element.dataset.pklOriginalLabel;
+
+      delete element.dataset.pklDisabledBeforeLoading;
+    }
+
+    /* ========================================================================
+       Input
+       ======================================================================== */
+
+    function input(options = {}) {
+      const label = normalizeRequiredText_(options.label, "label");
+
+      const id =
+        normalizeOptionalText_(options.id) ||
+        UtilitiesClient.createDomId("pkl-input");
+
+      const field = createFieldShell_({
+        id,
+        label,
+        helperText: options.helperText,
+        error: options.error,
+        required: options.required,
+      });
+
+      const control = document.createElement("input");
+
+      control.id = id;
+
+      control.name = normalizeOptionalText_(options.name) || id;
+
+      control.type = normalizeOptionalText_(options.type) || "text";
+
+      control.className = "pkl-input";
+
+      if (options.value !== undefined && options.value !== null) {
+        control.value = String(options.value);
+      }
+
+      const placeholder = normalizeOptionalText_(options.placeholder);
+
+      if (placeholder) {
+        control.placeholder = placeholder;
+      }
+
+      const autocomplete = normalizeOptionalText_(options.autocomplete);
+
+      if (autocomplete) {
+        control.autocomplete = autocomplete;
+      }
+
+      control.required = options.required === true;
+
+      control.disabled = options.disabled === true;
+
+      field.controlRoot.appendChild(control);
+
+      field.label.htmlFor = id;
+
+      applyFieldAccessibility_(control, field);
+
+      return {
+        element: field.root,
+        input: control,
+
+        setError(message) {
+          setFieldError_(control, field, message);
+        },
+      };
+    }
+
+    /* ========================================================================
+       Select
+       ======================================================================== */
+
+    function select(options = {}) {
+      const label = normalizeRequiredText_(options.label, "label");
+
+      const id =
+        normalizeOptionalText_(options.id) ||
+        UtilitiesClient.createDomId("pkl-select");
+
+      const field = createFieldShell_({
+        id,
+        label,
+        helperText: options.helperText,
+        error: options.error,
+        required: options.required,
+      });
+
+      const control = document.createElement("select");
+
+      control.id = id;
+
+      control.name = normalizeOptionalText_(options.name) || id;
+
+      control.className = "pkl-select";
+
+      control.required = options.required === true;
+
+      control.disabled = options.disabled === true;
+
+      const placeholder = normalizeOptionalText_(options.placeholder);
+
+      if (placeholder) {
+        const placeholderOption = document.createElement("option");
+
+        placeholderOption.value = "";
+        placeholderOption.textContent = placeholder;
+
+        placeholderOption.disabled = options.required === true;
+
+        placeholderOption.selected =
+          options.value === undefined ||
+          options.value === null ||
+          options.value === "";
+
+        control.appendChild(placeholderOption);
+      }
+
+      const selectOptions = Array.isArray(options.options)
+        ? options.options
+        : [];
+
+      selectOptions.forEach((option) => {
+        if (!option || typeof option !== "object") {
+          throw new Error("Opção inválida em Select.");
+        }
+
+        const optionLabel = normalizeRequiredText_(
+          option.label,
+          "option.label",
+        );
+
+        const optionElement = document.createElement("option");
+
+        optionElement.value =
+          option.value === undefined || option.value === null
+            ? ""
+            : String(option.value);
+
+        optionElement.textContent = optionLabel;
+
+        optionElement.disabled = option.disabled === true;
+
+        if (
+          options.value !== undefined &&
+          options.value !== null &&
+          String(options.value) === optionElement.value
+        ) {
+          optionElement.selected = true;
+        }
+
+        control.appendChild(optionElement);
+      });
+
+      field.controlRoot.appendChild(control);
+
+      field.label.htmlFor = id;
+
+      applyFieldAccessibility_(control, field);
+
+      return {
+        element: field.root,
+        select: control,
+
+        setError(message) {
+          setFieldError_(control, field, message);
+        },
+      };
+    }
+
+    /* ========================================================================
+       Checkbox
+       ======================================================================== */
+
+    function checkbox(options = {}) {
+      const label = normalizeRequiredText_(options.label, "label");
+
+      const id =
+        normalizeOptionalText_(options.id) ||
+        UtilitiesClient.createDomId("pkl-checkbox");
+
+      const root = document.createElement("div");
+
+      root.className = "pkl-checkbox-field";
+
+      const row = document.createElement("label");
+
+      row.className = "pkl-checkbox";
+
+      row.htmlFor = id;
+
+      const control = document.createElement("input");
+
+      control.id = id;
+      control.type = "checkbox";
+
+      control.name = normalizeOptionalText_(options.name) || id;
+
+      control.className = "pkl-checkbox__control";
+
+      control.checked = options.checked === true;
+
+      control.disabled = options.disabled === true;
+
+      const visual = document.createElement("span");
+
+      visual.className = "pkl-checkbox__visual";
+
+      visual.setAttribute("aria-hidden", "true");
+
+      const labelElement = document.createElement("span");
+
+      labelElement.className = "pkl-checkbox__label";
+
+      labelElement.textContent = label;
+
+      row.appendChild(control);
+      row.appendChild(visual);
+      row.appendChild(labelElement);
+
+      root.appendChild(row);
+
+      let helper = null;
+
+      const helperText = normalizeOptionalText_(options.helperText);
+
+      if (helperText) {
+        helper = document.createElement("div");
+
+        helper.id = UtilitiesClient.createDomId("pkl-checkbox-helper");
+
+        helper.className = "pkl-field__helper";
+
+        helper.textContent = helperText;
+
+        root.appendChild(helper);
+
+        control.setAttribute("aria-describedby", helper.id);
+      }
+
+      function setIndeterminate(isIndeterminate) {
+        const nextState = isIndeterminate === true;
+
+        control.indeterminate = nextState;
+
+        if (nextState) {
+          control.setAttribute("aria-checked", "mixed");
+
+          root.classList.add("is-indeterminate");
+        } else {
+          control.removeAttribute("aria-checked");
+
+          root.classList.remove("is-indeterminate");
+        }
+      }
+
+      setIndeterminate(options.indeterminate === true);
+
+      control.addEventListener("change", () => {
+        setIndeterminate(false);
+      });
+
+      return {
+        element: root,
+        checkbox: control,
+        setIndeterminate,
+      };
+    }
+
+    /* ========================================================================
+    Card
+    ======================================================================== */
+
+    function card(options = {}) {
+      const root = document.createElement("article");
+
+      root.className = "pkl-card";
+
+      if (options.raised === true) {
+        root.classList.add("pkl-card--raised");
+      }
+
+      if (
+        typeof options.className === "string" &&
+        options.className.trim() !== ""
+      ) {
+        root.classList.add(...options.className.trim().split(/\s+/));
+      }
+
+      let header = null;
+
+      const title = normalizeOptionalText_(options.title);
+
+      const description = normalizeOptionalText_(options.description);
+
+      if (title || description) {
+        header = document.createElement("header");
+
+        header.className = "pkl-card__header";
+
+        if (title) {
+          const titleId = UtilitiesClient.createDomId("pkl-card-title");
+
+          const titleElement = document.createElement("h3");
+
+          titleElement.id = titleId;
+          titleElement.className = "pkl-card__title";
+
+          titleElement.textContent = title;
+
+          header.appendChild(titleElement);
+
+          root.setAttribute("aria-labelledby", titleId);
+        }
+
+        if (description) {
+          const descriptionElement = document.createElement("p");
+
+          descriptionElement.className = "pkl-card__description";
+
+          descriptionElement.textContent = description;
+
+          header.appendChild(descriptionElement);
+        }
+
+        root.appendChild(header);
+      }
+
+      const body = document.createElement("div");
+
+      body.className = "pkl-card__body";
+
+      appendComponentContent_(body, options.body);
+
+      root.appendChild(body);
+
+      let footer = null;
+
+      if (options.footer !== undefined && options.footer !== null) {
+        footer = document.createElement("footer");
+
+        footer.className = "pkl-card__footer";
+
+        appendComponentContent_(footer, options.footer);
+
+        root.appendChild(footer);
+      }
+
+      return {
+        element: root,
+        header,
+        body,
+        footer,
+      };
+    }
+
+    /* ========================================================================
+      Badge
+      ======================================================================== */
+
+    function badge(options = {}) {
+      const label = normalizeRequiredText_(options.label, "label");
+
+      const variant = normalizeBadgeVariant_(options.variant);
+
+      const element = document.createElement("span");
+
+      element.className = `pkl-badge pkl-badge--${variant}`;
+
+      element.textContent = label;
+
+      return element;
+    }
+
+    /* ========================================================================
+   StatCard
+   ======================================================================== */
+
+    function statCard(options = {}) {
+      const label = normalizeRequiredText_(options.label, "label");
+
+      if (options.value === undefined || options.value === null) {
+        throw new Error("value é obrigatório.");
+      }
+
+      const root = document.createElement("article");
+
+      root.className = "pkl-stat-card";
+
+      const labelId = UtilitiesClient.createDomId("pkl-stat-label");
+
+      const labelElement = document.createElement("div");
+
+      labelElement.id = labelId;
+      labelElement.className = "pkl-stat-card__label";
+
+      labelElement.textContent = label;
+
+      root.setAttribute("aria-labelledby", labelId);
+
+      const valueElement = document.createElement("div");
+
+      valueElement.className = "pkl-stat-card__value";
+
+      valueElement.textContent = String(options.value);
+
+      root.appendChild(labelElement);
+      root.appendChild(valueElement);
+
+      let supportingElement = null;
+
+      const supportingText = normalizeOptionalText_(options.supportingText);
+
+      if (supportingText) {
+        supportingElement = document.createElement("div");
+
+        supportingElement.className = "pkl-stat-card__supporting";
+
+        supportingElement.textContent = supportingText;
+
+        root.appendChild(supportingElement);
+      }
+
+      if (options.status instanceof Node) {
+        const statusRoot = document.createElement("div");
+
+        statusRoot.className = "pkl-stat-card__status";
+
+        statusRoot.appendChild(options.status);
+
+        root.appendChild(statusRoot);
+      }
+
+      return {
+        element: root,
+        value: valueElement,
+        supporting: supportingElement,
+      };
+    }
+
+    /* ========================================================================
+   Progress
+   ======================================================================== */
+
+    function progress(options = {}) {
+      const label = normalizeRequiredText_(options.label, "label");
+
+      const value = normalizeProgressNumber_(options.value, "value");
+
+      const max =
+        options.max === undefined
+          ? 100
+          : normalizeProgressNumber_(options.max, "max");
+
+      if (max <= 0) {
+        throw new Error("max deve ser maior que zero.");
+      }
+
+      const normalizedValue = Math.min(Math.max(value, 0), max);
+
+      const percentage = (normalizedValue / max) * 100;
+
+      const variant = normalizeProgressVariant_(options.variant);
+
+      const root = document.createElement("div");
+
+      root.className = "pkl-progress";
+
+      const header = document.createElement("div");
+
+      header.className = "pkl-progress__header";
+
+      const labelElement = document.createElement("span");
+
+      labelElement.className = "pkl-progress__label";
+
+      labelElement.textContent = label;
+
+      header.appendChild(labelElement);
+
+      const showValue = options.showValue !== false;
+
+      if (showValue) {
+        const valueElement = document.createElement("span");
+
+        valueElement.className = "pkl-progress__value";
+
+        valueElement.textContent =
+          normalizeOptionalText_(options.valueText) ||
+          `${Math.round(percentage)}%`;
+
+        header.appendChild(valueElement);
+      }
+
+      const track = document.createElement("div");
+
+      track.className = "pkl-progress__track";
+
+      track.setAttribute("role", "progressbar");
+
+      track.setAttribute("aria-label", label);
+
+      track.setAttribute("aria-valuemin", "0");
+
+      track.setAttribute("aria-valuemax", String(max));
+
+      track.setAttribute("aria-valuenow", String(normalizedValue));
+
+      const valueText = normalizeOptionalText_(options.valueText);
+
+      if (valueText) {
+        track.setAttribute("aria-valuetext", valueText);
+      }
+
+      const bar = document.createElement("div");
+
+      bar.className = `pkl-progress__bar pkl-progress__bar--${variant}`;
+
+      bar.style.width = `${percentage}%`;
+
+      track.appendChild(bar);
+
+      root.appendChild(header);
+      root.appendChild(track);
+
+      return {
+        element: root,
+        track,
+        bar,
+      };
+    }
+
+    /* ========================================================================
+   Table
+   ======================================================================== */
+
+    function table(options = {}) {
+      const columns = normalizeTableColumns_(options.columns);
+
+      const rows = Array.isArray(options.rows) ? options.rows : [];
+
+      const root = document.createElement("div");
+
+      root.className = "pkl-table-shell";
+
+      const scroll = document.createElement("div");
+
+      scroll.className = "pkl-table-scroll";
+
+      scroll.tabIndex = 0;
+
+      const caption = normalizeOptionalText_(options.caption);
+
+      scroll.setAttribute("role", "region");
+
+      scroll.setAttribute("aria-label", caption || "Tabela de dados");
+
+      const tableElement = document.createElement("table");
+
+      tableElement.className = "pkl-table";
+
+      if (caption) {
+        const captionElement = document.createElement("caption");
+
+        captionElement.className = "pkl-table__caption";
+
+        captionElement.textContent = caption;
+
+        tableElement.appendChild(captionElement);
+      }
+
+      const head = document.createElement("thead");
+
+      const headRow = document.createElement("tr");
+
+      columns.forEach((column) => {
+        const th = document.createElement("th");
+
+        th.scope = "col";
+
+        th.textContent = column.label;
+
+        th.className = `pkl-table__cell pkl-table__cell--${column.align}`;
+
+        headRow.appendChild(th);
+      });
+
+      head.appendChild(headRow);
+
+      const body = document.createElement("tbody");
+
+      rows.forEach((row) => {
+        if (!row || typeof row !== "object" || Array.isArray(row)) {
+          throw new Error("Linha inválida em Table.");
+        }
+
+        const tr = document.createElement("tr");
+
+        columns.forEach((column) => {
+          const td = document.createElement("td");
+
+          td.className = `pkl-table__cell pkl-table__cell--${column.align}`;
+
+          appendComponentContent_(td, row[column.key]);
+
+          tr.appendChild(td);
+        });
+
+        body.appendChild(tr);
+      });
+
+      tableElement.appendChild(head);
+      tableElement.appendChild(body);
+
+      scroll.appendChild(tableElement);
+      root.appendChild(scroll);
+
+      return {
+        element: root,
+        table: tableElement,
+        scroll,
+      };
+    }
+
+    /* ========================================================================
+   Skeleton
+   ======================================================================== */
+
+    function skeleton(options = {}) {
+      const lines =
+        Number.isInteger(options.lines) && options.lines > 0
+          ? options.lines
+          : 1;
+
+      const root = document.createElement("div");
+
+      root.className = "pkl-skeleton";
+
+      root.setAttribute("aria-hidden", "true");
+
+      for (let index = 0; index < lines; index += 1) {
+        const line = document.createElement("div");
+
+        line.className = "pkl-skeleton__line";
+
+        if (lines > 1 && index === lines - 1) {
+          line.classList.add("pkl-skeleton__line--short");
+        }
+
+        root.appendChild(line);
+      }
+
+      return root;
+    }
+
+    /* ========================================================================
+   EmptyState
+   ======================================================================== */
+
+    function emptyState(options = {}) {
+      const title = normalizeRequiredText_(options.title, "title");
+
+      const root = document.createElement("section");
+
+      root.className = "pkl-empty-state";
+
+      const titleId = UtilitiesClient.createDomId("pkl-empty-state-title");
+
+      root.setAttribute("aria-labelledby", titleId);
+
+      if (typeof options.icon === "string" && options.icon.trim() !== "") {
+        const iconRoot = document.createElement("div");
+
+        iconRoot.className = "pkl-empty-state__icon";
+
+        iconRoot.appendChild(icon(options.icon.trim()));
+
+        root.appendChild(iconRoot);
+      }
+
+      const titleElement = document.createElement("h3");
+
+      titleElement.id = titleId;
+      titleElement.className = "pkl-empty-state__title";
+
+      titleElement.textContent = title;
+
+      root.appendChild(titleElement);
+
+      const description = normalizeOptionalText_(options.description);
+
+      if (description) {
+        const descriptionElement = document.createElement("p");
+
+        descriptionElement.className = "pkl-empty-state__description";
+
+        descriptionElement.textContent = description;
+
+        root.appendChild(descriptionElement);
+      }
+
+      if (options.action instanceof Node) {
+        const actionRoot = document.createElement("div");
+
+        actionRoot.className = "pkl-empty-state__action";
+
+        actionRoot.appendChild(options.action);
+
+        root.appendChild(actionRoot);
+      }
+
+      return {
+        element: root,
+      };
+    }
+
+    /* ========================================================================
+   Tabs
+   ======================================================================== */
+
+    function tabs(options = {}) {
+      const items = normalizeTabs_(options.tabs);
+
+      const root = document.createElement("div");
+
+      root.className = "pkl-tabs";
+
+      const tabList = document.createElement("div");
+
+      tabList.className = "pkl-tabs__list";
+
+      tabList.setAttribute("role", "tablist");
+
+      tabList.setAttribute(
+        "aria-label",
+        normalizeOptionalText_(options.ariaLabel) || "Navegação por abas",
+      );
+
+      const panelsRoot = document.createElement("div");
+
+      panelsRoot.className = "pkl-tabs__panels";
+
+      const tabButtons = [];
+      const panels = [];
+
+      items.forEach((item, index) => {
+        const tabId = UtilitiesClient.createDomId("pkl-tab");
+
+        const panelId = UtilitiesClient.createDomId("pkl-tab-panel");
+
+        const tabButton = document.createElement("button");
+
+        tabButton.type = "button";
+
+        tabButton.id = tabId;
+
+        tabButton.className = "pkl-tabs__tab";
+
+        tabButton.setAttribute("role", "tab");
+
+        tabButton.setAttribute("aria-controls", panelId);
+
+        tabButton.textContent = item.label;
+
+        const panel = document.createElement("div");
+
+        panel.id = panelId;
+
+        panel.className = "pkl-tabs__panel";
+
+        panel.setAttribute("role", "tabpanel");
+
+        panel.setAttribute("aria-labelledby", tabId);
+
+        panel.tabIndex = 0;
+
+        appendComponentContent_(panel, item.content);
+
+        tabButton.addEventListener("click", () => {
+          activateTab(index, false);
+        });
+
+        tabButton.addEventListener("keydown", (event) => {
+          let nextIndex = null;
+
+          switch (event.key) {
+            case "ArrowRight":
+              nextIndex = (index + 1) % items.length;
+              break;
+
+            case "ArrowLeft":
+              nextIndex = (index - 1 + items.length) % items.length;
+              break;
+
+            case "Home":
+              nextIndex = 0;
+              break;
+
+            case "End":
+              nextIndex = items.length - 1;
+              break;
+
+            default:
+              return;
+          }
+
+          event.preventDefault();
+
+          activateTab(nextIndex, true);
+        });
+
+        tabButtons.push(tabButton);
+
+        panels.push(panel);
+
+        tabList.appendChild(tabButton);
+
+        panelsRoot.appendChild(panel);
+      });
+
+      root.appendChild(tabList);
+      root.appendChild(panelsRoot);
+
+      function activateTab(nextIndex, shouldFocus) {
+        tabButtons.forEach((tabButton, index) => {
+          const isActive = index === nextIndex;
+
+          tabButton.classList.toggle("is-active", isActive);
+
+          tabButton.setAttribute("aria-selected", isActive ? "true" : "false");
+
+          tabButton.tabIndex = isActive ? 0 : -1;
+
+          panels[index].hidden = !isActive;
+        });
+
+        if (shouldFocus === true) {
+          tabButtons[nextIndex].focus();
+        }
+
+        if (typeof options.onChange === "function") {
+          options.onChange(nextIndex, items[nextIndex]);
+        }
+      }
+
+      const initialIndex =
+        Number.isInteger(options.activeIndex) &&
+        options.activeIndex >= 0 &&
+        options.activeIndex < items.length
+          ? options.activeIndex
+          : 0;
+
+      activateTab(initialIndex, false);
+
+      return {
+        element: root,
+        tabs: tabButtons,
+        panels,
+
+        activate(index) {
+          if (!Number.isInteger(index) || index < 0 || index >= items.length) {
+            throw new Error("Índice inválido em Tabs.");
+          }
+
+          activateTab(index, false);
+        },
+      };
+    }
+
+    /* ========================================================================
+   Tooltip
+   ======================================================================== */
+
+    function tooltip(options = {}) {
+      if (!(options.target instanceof HTMLElement)) {
+        throw new Error("Tooltip exige um target HTML válido.");
+      }
+
+      if (options.target.matches(":disabled") || options.target.tabIndex < 0) {
+        throw new Error("Tooltip exige um target acessível por teclado.");
+      }
+
+      const text = normalizeRequiredText_(options.text, "text");
+
+      const position = normalizeTooltipPosition_(options.position);
+
+      const root = document.createElement("span");
+
+      root.className = `pkl-tooltip pkl-tooltip--${position}`;
+
+      const bubble = document.createElement("span");
+
+      const tooltipId = UtilitiesClient.createDomId("pkl-tooltip");
+
+      bubble.id = tooltipId;
+
+      bubble.className = "pkl-tooltip__bubble";
+
+      bubble.setAttribute("role", "tooltip");
+
+      bubble.textContent = text;
+
+      const existingDescribedBy =
+        options.target.getAttribute &&
+        options.target.getAttribute("aria-describedby");
+
+      if (options.target.setAttribute) {
+        options.target.setAttribute(
+          "aria-describedby",
+          existingDescribedBy
+            ? `${existingDescribedBy} ${tooltipId}`
+            : tooltipId,
+        );
+      }
+
+      root.appendChild(options.target);
+
+      root.appendChild(bubble);
+
+      function show() {
+        root.classList.add("is-visible");
+      }
+
+      function hide() {
+        root.classList.remove("is-visible");
+      }
+
+      root.addEventListener("mouseenter", show);
+
+      root.addEventListener("mouseleave", hide);
+
+      root.addEventListener("focusin", show);
+
+      root.addEventListener("focusout", hide);
+
+      root.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          hide();
+        }
+      });
+
+      return {
+        element: root,
+        target: options.target,
+        tooltip: bubble,
+        show,
+        hide,
+      };
+    }
+
+    /* ========================================================================
+   Modal
+   ======================================================================== */
+
+    function modal(options = {}) {
+      const title = normalizeRequiredText_(options.title, "title");
+
+      const root = document.createElement("div");
+
+      root.className = "pkl-modal";
+
+      root.hidden = true;
+
+      const panel = document.createElement("section");
+
+      panel.className = "pkl-modal__panel";
+
+      panel.setAttribute("role", "dialog");
+
+      panel.setAttribute("aria-modal", "true");
+
+      panel.tabIndex = -1;
+
+      const titleId = UtilitiesClient.createDomId("pkl-modal-title");
+
+      panel.setAttribute("aria-labelledby", titleId);
+
+      const header = document.createElement("header");
+
+      header.className = "pkl-modal__header";
+
+      const headingGroup = document.createElement("div");
+
+      headingGroup.className = "pkl-modal__heading";
+
+      const titleElement = document.createElement("h2");
+
+      titleElement.id = titleId;
+
+      titleElement.className = "pkl-modal__title";
+
+      titleElement.textContent = title;
+
+      headingGroup.appendChild(titleElement);
+
+      const description = normalizeOptionalText_(options.description);
+
+      if (description) {
+        const descriptionId = UtilitiesClient.createDomId(
+          "pkl-modal-description",
+        );
+
+        const descriptionElement = document.createElement("p");
+
+        descriptionElement.id = descriptionId;
+
+        descriptionElement.className = "pkl-modal__description";
+
+        descriptionElement.textContent = description;
+
+        headingGroup.appendChild(descriptionElement);
+
+        panel.setAttribute("aria-describedby", descriptionId);
+      }
+
+      const closeButton = button({
+        label: "Fechar",
+        variant: "ghost",
+        icon: "x",
+        ariaLabel: "Fechar modal",
+      });
+
+      closeButton.classList.add("pkl-modal__close");
+
+      header.appendChild(headingGroup);
+
+      header.appendChild(closeButton);
+
+      panel.appendChild(header);
+
+      const body = document.createElement("div");
+
+      body.className = "pkl-modal__body";
+
+      appendComponentContent_(body, options.body);
+
+      panel.appendChild(body);
+
+      let footer = null;
+
+      if (options.footer !== undefined && options.footer !== null) {
+        footer = document.createElement("footer");
+
+        footer.className = "pkl-modal__footer";
+
+        appendComponentContent_(footer, options.footer);
+
+        panel.appendChild(footer);
+      }
+
+      root.appendChild(panel);
+
+      let previousFocus = null;
+      let previousBodyOverflow = "";
+
+      const controller = {
+        element: root,
+        panel,
+        body,
+        footer,
+        open,
+        close,
+      };
+
+      closeButton.addEventListener("click", () => {
+        close("close-button");
+      });
+
+      root.addEventListener("mousedown", (event) => {
+        if (event.target === root && options.closeOnOverlay !== false) {
+          close("overlay");
+        }
+      });
+
+      root.addEventListener("keydown", handleKeyDown_);
+
+      function open() {
+        if (activeModal && activeModal !== controller) {
+          activeModal.close("replaced", false);
+        }
+
+        activeModal = controller;
+
+        previousFocus =
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null;
+
+        previousBodyOverflow = document.body.style.overflow;
+
+        document.body.style.overflow = "hidden";
+
+        if (!root.isConnected) {
+          document.body.appendChild(root);
+        }
+
+        root.hidden = false;
+
+        requestAnimationFrame(() => {
+          const focusTarget = resolveInitialFocus_();
+
+          focusTarget.focus();
+        });
+      }
+
+      function close(reason = "programmatic", restoreFocus = true) {
+        if (root.hidden) {
+          return;
+        }
+
+        root.hidden = true;
+
+        document.body.style.overflow = previousBodyOverflow;
+
+        root.remove();
+
+        if (activeModal === controller) {
+          activeModal = null;
+        }
+
+        if (restoreFocus && previousFocus && previousFocus.isConnected) {
+          previousFocus.focus();
+        }
+
+        if (typeof options.onClose === "function") {
+          options.onClose(reason);
+        }
+      }
+
+      function handleKeyDown_(event) {
+        if (event.key === "Escape" && options.closeOnEscape !== false) {
+          event.preventDefault();
+
+          close("escape");
+          return;
+        }
+
+        if (event.key !== "Tab") {
+          return;
+        }
+
+        const focusable = getFocusableElements_(panel);
+
+        if (focusable.length === 0) {
+          event.preventDefault();
+          panel.focus();
+          return;
+        }
+
+        const first = focusable[0];
+
+        const last = focusable[focusable.length - 1];
+
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+          return;
+        }
+
+        if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+
+      function resolveInitialFocus_() {
+        if (
+          options.initialFocus instanceof HTMLElement &&
+          panel.contains(options.initialFocus) &&
+          !options.initialFocus.disabled
+        ) {
+          return options.initialFocus;
+        }
+
+        const focusable = getFocusableElements_(panel);
+
+        return focusable[0] || panel;
+      }
+
+      return controller;
+    }
+
+    /* ========================================================================
+   ConfirmDialog
+   ======================================================================== */
+
+    function confirmDialog(options = {}) {
+      const title = normalizeRequiredText_(options.title, "title");
+
+      const message = normalizeRequiredText_(options.message, "message");
+
+      const confirmLabel =
+        normalizeOptionalText_(options.confirmLabel) || "Confirmar";
+
+      const cancelLabel =
+        normalizeOptionalText_(options.cancelLabel) || "Cancelar";
+
+      let pendingResolve = null;
+
+      const messageElement = document.createElement("p");
+
+      messageElement.className = "pkl-confirm-dialog__message";
+
+      messageElement.textContent = message;
+
+      const cancelButton = button({
+        label: cancelLabel,
+        variant: "secondary",
+      });
+
+      const confirmButton = button({
+        label: confirmLabel,
+        variant: options.danger === true ? "danger" : "primary",
+      });
+
+      const dialog = modal({
+        title,
+        body: messageElement,
+        footer: [cancelButton, confirmButton],
+
+        closeOnOverlay: options.closeOnOverlay !== false,
+
+        closeOnEscape: options.closeOnEscape !== false,
+
+        initialFocus:
+          options.initialFocus === "confirm" ? confirmButton : cancelButton,
+
+        onClose(reason) {
+          if (!pendingResolve) {
+            return;
+          }
+
+          const resolve = pendingResolve;
+
+          pendingResolve = null;
+
+          resolve(reason === "confirm");
+        },
+      });
+
+      cancelButton.addEventListener("click", () => {
+        dialog.close("cancel");
+      });
+
+      confirmButton.addEventListener("click", () => {
+        dialog.close("confirm");
+      });
+
+      function open() {
+        if (pendingResolve) {
+          throw new Error("ConfirmDialog já está aberto.");
+        }
+
+        return new Promise((resolve) => {
+          pendingResolve = resolve;
+
+          dialog.open();
+        });
+      }
+
+      return {
+        element: dialog.element,
+
+        open,
+
+        close: dialog.close,
+      };
+    }
+
+    function getFocusableElements_(container) {
+      return Array.from(container.querySelectorAll(FOCUSABLE_SELECTOR)).filter(
+        (element) => {
+          if (!(element instanceof HTMLElement)) {
+            return false;
+          }
+
+          if (
+            element.hidden ||
+            element.closest("[hidden]") ||
+            element.closest("[inert]") ||
+            element.closest('[aria-hidden="true"]')
+          ) {
+            return false;
+          }
+
+          return element.getClientRects().length > 0;
+        },
+      );
+    }
+
+    /* ========================================================================
+   Toast
+   ======================================================================== */
+
+    function toast(options = {}) {
+      const message = normalizeRequiredText_(options.message, "message");
+
+      const variant = normalizeToastVariant_(options.variant);
+
+      const title = normalizeOptionalText_(options.title);
+
+      const duration = normalizeToastDuration_(options.duration);
+
+      const container = ensureToastContainer_();
+
+      const root = document.createElement("article");
+
+      root.className = `pkl-toast pkl-toast--${variant}`;
+
+      const content = document.createElement("div");
+
+      content.className = "pkl-toast__content";
+
+      content.setAttribute("role", variant === "danger" ? "alert" : "status");
+
+      content.setAttribute("aria-atomic", "true");
+
+      const kind = document.createElement("div");
+
+      kind.className = "pkl-toast__kind";
+
+      kind.textContent = TOAST_LABELS[variant];
+
+      content.appendChild(kind);
+
+      if (title) {
+        const titleElement = document.createElement("div");
+
+        titleElement.className = "pkl-toast__title";
+
+        titleElement.textContent = title;
+
+        content.appendChild(titleElement);
+      }
+
+      const messageElement = document.createElement("p");
+
+      messageElement.className = "pkl-toast__message";
+
+      messageElement.textContent = message;
+
+      content.appendChild(messageElement);
+
+      const closeButton = button({
+        label: "Fechar",
+        variant: "ghost",
+        icon: "x",
+        ariaLabel: "Fechar notificação",
+      });
+
+      closeButton.classList.add("pkl-toast__close");
+
+      root.appendChild(content);
+      root.appendChild(closeButton);
+
+      container.appendChild(root);
+
+      let timeoutId = null;
+      let startedAt = 0;
+      let remaining = duration;
+      let closed = false;
+
+      closeButton.addEventListener("click", () => {
+        close("close-button");
+      });
+
+      root.addEventListener("mouseenter", pause_);
+
+      root.addEventListener("mouseleave", resume_);
+
+      root.addEventListener("focusin", pause_);
+
+      root.addEventListener("focusout", (event) => {
+        if (root.contains(event.relatedTarget)) {
+          return;
+        }
+
+        resume_();
+      });
+
+      requestAnimationFrame(() => {
+        root.classList.add("is-visible");
+      });
+
+      if (duration > 0) {
+        schedule_();
+      }
+
+      function schedule_() {
+        if (closed || remaining <= 0) {
+          return;
+        }
+
+        startedAt = Date.now();
+
+        timeoutId = window.setTimeout(() => {
+          timeoutId = null;
+          close("timeout");
+        }, remaining);
+      }
+
+      function pause_() {
+        if (closed || !timeoutId) {
+          return;
+        }
+
+        window.clearTimeout(timeoutId);
+
+        timeoutId = null;
+
+        remaining = Math.max(0, remaining - (Date.now() - startedAt));
+      }
+
+      function resume_() {
+        if (closed || duration === 0 || timeoutId) {
+          return;
+        }
+
+        if (remaining <= 0) {
+          close("timeout");
+          return;
+        }
+
+        schedule_();
+      }
+
+      function close(reason = "programmatic") {
+        if (closed) {
+          return;
+        }
+
+        closed = true;
+
+        if (timeoutId) {
+          window.clearTimeout(timeoutId);
+
+          timeoutId = null;
+        }
+
+        root.classList.remove("is-visible");
+
+        window.setTimeout(() => {
+          root.remove();
+
+          if (toastContainer && toastContainer.childElementCount === 0) {
+            toastContainer.remove();
+            toastContainer = null;
+          }
+        }, 200);
+
+        if (typeof options.onClose === "function") {
+          options.onClose(reason);
+        }
+      }
+
+      return {
+        element: root,
+        close,
+      };
+    }
+
+    function ensureToastContainer_() {
+      if (toastContainer && toastContainer.isConnected) {
+        return toastContainer;
+      }
+
+      toastContainer = document.createElement("div");
+
+      toastContainer.id = "pkl-toast-root";
+
+      toastContainer.className = "pkl-toast-region";
+
+      toastContainer.setAttribute("aria-label", "Notificações");
+
+      document.body.appendChild(toastContainer);
+
+      return toastContainer;
+    }
+
+    function normalizeToastVariant_(variant) {
+      const normalized = normalizeOptionalText_(variant) || "neutral";
+
+      if (!TOAST_VARIANTS.includes(normalized)) {
+        throw new Error(`Variante de Toast desconhecida: ${normalized}.`);
+      }
+
+      return normalized;
+    }
+
+    function normalizeToastDuration_(duration) {
+      if (duration === undefined) {
+        return 5000;
+      }
+
+      const normalized = Number(duration);
+
+      if (!Number.isFinite(normalized) || normalized < 0) {
+        throw new Error(
+          "duration do Toast deve ser zero ou um número positivo.",
+        );
+      }
+
+      return normalized;
+    }
+
+    /* ========================================================================
+       Field helpers
+       ======================================================================== */
+
+    function createFieldShell_(options) {
+      const root = document.createElement("div");
+
+      root.className = "pkl-field";
+
+      const label = document.createElement("label");
+
+      label.className = "pkl-field__label";
+
+      label.textContent = options.label;
+
+      if (options.required === true) {
+        const requiredMark = document.createElement("span");
+
+        requiredMark.className = "pkl-field__required";
+
+        requiredMark.textContent = " *";
+
+        requiredMark.setAttribute("aria-hidden", "true");
+
+        label.appendChild(requiredMark);
+      }
+
+      const controlRoot = document.createElement("div");
+
+      controlRoot.className = "pkl-field__control";
+
+      root.appendChild(label);
+      root.appendChild(controlRoot);
+
+      let helper = null;
+      let error = null;
+
+      const helperText = normalizeOptionalText_(options.helperText);
+
+      if (helperText) {
+        helper = document.createElement("div");
+
+        helper.id = UtilitiesClient.createDomId("pkl-helper");
+
+        helper.className = "pkl-field__helper";
+
+        helper.textContent = helperText;
+
+        root.appendChild(helper);
+      }
+
+      const errorText = normalizeOptionalText_(options.error);
+
+      if (errorText) {
+        error = document.createElement("div");
+
+        error.id = UtilitiesClient.createDomId("pkl-error");
+
+        error.className = "pkl-field__error";
+
+        error.setAttribute("role", "alert");
+
+        error.textContent = errorText;
+
+        root.appendChild(error);
+        root.classList.add("has-error");
+      }
+
+      return {
+        root,
+        label,
+        controlRoot,
+        helper,
+        error,
+      };
+    }
+
+    function applyFieldAccessibility_(control, field) {
+      const describedBy = [];
+
+      if (field.helper) {
+        describedBy.push(field.helper.id);
+      }
+
+      if (field.error) {
+        describedBy.push(field.error.id);
+
+        control.setAttribute("aria-invalid", "true");
+      } else {
+        control.removeAttribute("aria-invalid");
+      }
+
+      if (describedBy.length > 0) {
+        control.setAttribute("aria-describedby", describedBy.join(" "));
+      } else {
+        control.removeAttribute("aria-describedby");
+      }
+    }
+
+    function setFieldError_(control, field, message) {
+      const normalizedMessage = normalizeOptionalText_(message);
+
+      if (!normalizedMessage) {
+        if (field.error) {
+          field.error.remove();
+          field.error = null;
+        }
+
+        field.root.classList.remove("has-error");
+
+        control.removeAttribute("aria-invalid");
+
+        applyFieldAccessibility_(control, field);
+
+        return;
+      }
+
+      if (!field.error) {
+        field.error = document.createElement("div");
+
+        field.error.id = UtilitiesClient.createDomId("pkl-error");
+
+        field.error.className = "pkl-field__error";
+
+        field.error.setAttribute("role", "alert");
+
+        field.root.appendChild(field.error);
+      }
+
+      field.error.textContent = normalizedMessage;
+
+      field.root.classList.add("has-error");
+
+      control.setAttribute("aria-invalid", "true");
+
+      applyFieldAccessibility_(control, field);
+    }
+
+    /* ========================================================================
+       Internal normalization
+       ======================================================================== */
+    function appendComponentContent_(container, content) {
+      if (content === undefined || content === null) {
+        return;
+      }
+
+      if (content instanceof Node) {
+        container.appendChild(content);
+        return;
+      }
+
+      if (Array.isArray(content)) {
+        content.forEach((item) => {
+          appendComponentContent_(container, item);
+        });
+
+        return;
+      }
+
+      if (typeof content === "string" || typeof content === "number") {
+        container.appendChild(document.createTextNode(String(content)));
+
+        return;
+      }
+
+      throw new Error("Conteúdo inválido para componente.");
+    }
+
+    function normalizeBadgeVariant_(variant) {
+      const normalized =
+        typeof variant === "string" && variant.trim() !== ""
+          ? variant.trim()
+          : "neutral";
+
+      if (!BADGE_VARIANTS.includes(normalized)) {
+        throw new Error(`Variante de Badge desconhecida: ${normalized}.`);
+      }
+
+      return normalized;
+    }
+
+    function normalizeTableColumns_(columns) {
+      if (!Array.isArray(columns) || columns.length === 0) {
+        throw new Error("Table exige pelo menos uma coluna.");
+      }
+
+      return columns.map((column) => {
+        if (!column || typeof column !== "object") {
+          throw new Error("Coluna inválida em Table.");
+        }
+
+        const key = normalizeRequiredText_(column.key, "column.key");
+
+        const label = normalizeRequiredText_(column.label, "column.label");
+
+        const align = normalizeOptionalText_(column.align) || "start";
+
+        if (!["start", "center", "end"].includes(align)) {
+          throw new Error(`Alinhamento de coluna desconhecido: ${align}.`);
+        }
+
+        return {
+          key,
+          label,
+          align,
+        };
+      });
+    }
+
+    function normalizeTabs_(items) {
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error("Tabs exige pelo menos uma aba.");
+      }
+
+      return items.map((item) => {
+        if (!item || typeof item !== "object") {
+          throw new Error("Aba inválida em Tabs.");
+        }
+
+        return {
+          label: normalizeRequiredText_(item.label, "tab.label"),
+
+          content: item.content,
+        };
+      });
+    }
+
+    function normalizeTooltipPosition_(position) {
+      const normalized = normalizeOptionalText_(position) || "top";
+
+      if (!["top", "bottom"].includes(normalized)) {
+        throw new Error(`Posição de Tooltip desconhecida: ${normalized}.`);
+      }
+
+      return normalized;
+    }
+
+    function normalizeProgressVariant_(variant) {
+      const normalized =
+        typeof variant === "string" && variant.trim() !== ""
+          ? variant.trim()
+          : "primary";
+
+      if (!PROGRESS_VARIANTS.includes(normalized)) {
+        throw new Error(`Variante de Progress desconhecida: ${normalized}.`);
+      }
+
+      return normalized;
+    }
+
+    function normalizeProgressNumber_(value, fieldName) {
+      const normalized = Number(value);
+
+      if (!Number.isFinite(normalized)) {
+        throw new Error(`${fieldName} deve ser numérico.`);
+      }
+
+      return normalized;
+    }
+
+    function normalizeButtonVariant_(variant) {
+      const normalized =
+        typeof variant === "string" && variant.trim() !== ""
+          ? variant.trim()
+          : "primary";
+
+      if (!BUTTON_VARIANTS.includes(normalized)) {
+        throw new Error(`Variante de Button desconhecida: ${normalized}.`);
+      }
+
+      return normalized;
+    }
+
+    function normalizeRequiredText_(value, fieldName) {
+      if (typeof value !== "string" || value.trim() === "") {
+        throw new Error(`${fieldName} é obrigatório.`);
+      }
+
+      return value.trim();
+    }
+
+    function normalizeOptionalText_(value) {
+      if (typeof value !== "string") {
+        return "";
+      }
+
+      return value.trim();
+    }
+
+    hydrateIcons(document);
+
+    return {
+      icon,
+      hydrateIcons,
+
+      Button: button,
+      setButtonLoading,
+
+      Input: input,
+      Select: select,
+      Checkbox: checkbox,
+      Card: card,
+      Badge: badge,
+      StatCard: statCard,
+      Progress: progress,
+      Table: table,
+      Skeleton: skeleton,
+      EmptyState: emptyState,
+      Tabs: tabs,
+      Tooltip: tooltip,
+      Modal: modal,
+      ConfirmDialog: confirmDialog,
+      Toast: toast,
+    };
+  })();
+</script>

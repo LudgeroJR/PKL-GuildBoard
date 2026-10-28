@@ -1,0 +1,1169 @@
+<script>
+  const ContributionAdminView = (() => {
+    let renderGeneration = 0;
+    const refreshers = new WeakMap();
+
+    function refresh(root) {
+      if (root && root.isConnected && refreshers.has(root)) refreshers.get(root)();
+    }
+
+    function render(options = {}) {
+      let generation =
+        ++renderGeneration;
+
+      const section =
+        document.createElement(
+          "section"
+        );
+
+      section.className =
+        "pkl-contribution-admin";
+
+      section.setAttribute(
+        "aria-labelledby",
+        "pkl-contribution-admin-title"
+      );
+
+      const header =
+        document.createElement(
+          "div"
+        );
+
+      header.className =
+        "pkl-contribution-admin__header";
+
+      const heading =
+        document.createElement(
+          "div"
+        );
+
+      heading.innerHTML = `
+        <h2
+          id="pkl-contribution-admin-title"
+          class="pkl-contribution-admin__title"
+        >
+          Contribuição semanal
+        </h2>
+
+        <p class="pkl-contribution-admin__description">
+          Contribuição acumulada sincronizada da API da Guild. A meta mantém o snapshot da semana.
+        </p>
+      `;
+
+      const content =
+        document.createElement(
+          "div"
+        );
+
+      content.className =
+        "pkl-contribution-admin__content";
+
+      header.appendChild(
+        heading
+      );
+
+      section.appendChild(
+        header
+      );
+
+      section.appendChild(
+        content
+      );
+
+      const tasksContent = document.createElement("section");
+      tasksContent.className = "pkl-contribution-admin__tasks";
+      tasksContent.setAttribute("aria-label", "Tasks semanais");
+      section.appendChild(tasksContent);
+
+      renderLoading_(
+        content
+      );
+
+      loadCurrentWeek_(
+        content,
+        generation,
+        options
+      );
+      loadTasks_(tasksContent, generation, options);
+      refreshers.set(section, () => {
+        generation = ++renderGeneration;
+        renderLoading_(content);
+        loadCurrentWeek_(content, generation, options);
+        loadTasks_(tasksContent, generation, options);
+      });
+
+      return section;
+    }
+
+    async function loadTasks_(host, generation, options) {
+      const loading = document.createElement("p");
+      loading.className = "pkl-status";
+      loading.setAttribute("role", "status");
+      loading.textContent = "Carregando tasks e cobertura diária...";
+      host.replaceChildren(loading);
+      try {
+        const [taskResult, statusResult] = await Promise.allSettled([
+          ApiClient.request("contributions.getTaskOverview", {}),
+          ApiClient.request("guild.getSyncStatus", {}),
+        ]);
+        if (taskResult.status === "rejected") throw taskResult.reason;
+        if (statusResult.status === "rejected" && statusResult.reason &&
+            statusResult.reason.code === "AUTH_REQUIRED") throw statusResult.reason;
+        const tasks = taskResult.value;
+        const syncStatus = statusResult.status === "fulfilled" ? statusResult.value : undefined;
+        if (generation !== renderGeneration || !host.isConnected) return;
+        if (!tasks || !Array.isArray(tasks.weekly)) throw new Error("Resposta de tasks inválida.");
+        const heading = document.createElement("h2");
+        heading.className = "pkl-contribution-admin__title";
+        heading.textContent = "Tasks";
+        const status = document.createElement("p");
+        status.className = "pkl-status";
+        status.setAttribute("role", "status");
+        status.textContent = formatSyncStatus_(syncStatus);
+        const refresh = UI.Button({label: "Atualizar tasks", variant: "secondary",
+          onClick: () => loadTasks_(host, generation, options)});
+        const weeklyTitle = document.createElement("h3");
+        weeklyTitle.className = "pkl-contribution-admin__subtitle";
+        weeklyTitle.textContent = "Totais semanais";
+        host.replaceChildren(heading, status, refresh, weeklyTitle,
+          taskTable_("Totais semanais de tasks", tasks.weekly, false));
+      } catch (error) {
+        if (generation !== renderGeneration || !host.isConnected) return;
+        if (error && error.code === "AUTH_REQUIRED" &&
+            typeof options.onAuthRequired === "function") {
+          options.onAuthRequired();
+          return;
+        }
+        const retry = UI.Button({label: "Tentar novamente", variant: "secondary",
+          onClick: () => loadTasks_(host, generation, options)});
+        host.replaceChildren(UI.EmptyState({title: "Não foi possível carregar as tasks",
+          description: error && error.message ? error.message : "Tente novamente.",
+          action: retry}).element);
+      }
+    }
+
+    function taskTable_(caption, rows, daily) {
+      if (rows.length === 0) {
+        return UI.EmptyState({title: daily ? "Sem registros diários" : "Sem total semanal",
+          description: "Nenhum dado coletado para esta semana."}).element;
+      }
+      const table = UI.Table({caption,
+        columns: daily
+          ? [{key: "day", label: "Dia"}, {key: "name", label: "Membro"}, {key: "delivered", label: "Entregues"}]
+          : [{key: "name", label: "Membro"}, {key: "delivered", label: "Entregues na semana"}],
+        rows: rows.map(row => daily
+          ? {day: row.day, name: row.name, delivered: String(row.delivered)}
+          : {name: row.name, delivered: String(row.delivered)}),
+      }).element;
+      const viewport = document.createElement("div");
+      viewport.className = "pkl-contribution-admin__task-table";
+      viewport.appendChild(table);
+      return viewport;
+    }
+
+    function formatSyncStatus_(syncStatus) {
+      if (syncStatus === undefined) return "Resultado da última sincronização indisponível.";
+      if (syncStatus === null) return "Ainda não há resultado de sincronização registrado.";
+      const when = new Date(syncStatus.checkedAt).toLocaleString("pt-BR");
+      const core = syncStatus.core && syncStatus.core.ok ? "núcleo concluído" :
+        `núcleo falhou: ${syncStatus.core && syncStatus.core.reason || "erro desconhecido"}`;
+      const daily = syncStatus.daily && syncStatus.daily.ok ? "diário concluído" :
+        `diário falhou: ${syncStatus.daily && syncStatus.daily.reason || "erro desconhecido"}`;
+      return `Última sincronização (${when}): ${core}; ${daily}.`;
+    }
+
+    async function loadCurrentWeek_(
+      content,
+      generation,
+      options
+    ) {
+      try {
+        const week =
+          await ApiClient.request(
+            "contributions.getCurrentWeek",
+            {}
+          );
+
+        if (
+          generation !==
+          renderGeneration
+        ) {
+          return;
+        }
+
+        validateWeekDto_(
+          week
+        );
+
+        renderWeek_(
+          content,
+          week
+        );
+      } catch (error) {
+        if (
+          generation !==
+          renderGeneration
+        ) {
+          return;
+        }
+
+        if (
+          error &&
+          error.code ===
+            "AUTH_REQUIRED" &&
+          typeof options.onAuthRequired ===
+            "function"
+        ) {
+          options.onAuthRequired();
+          return;
+        }
+
+        renderLoadError_(
+          content,
+          generation,
+          options
+        );
+      }
+    }
+
+    function renderLoading_(
+      content
+    ) {
+      content.replaceChildren();
+
+      const status =
+        document.createElement(
+          "div"
+        );
+
+      status.className =
+        "pkl-contribution-admin__loading";
+
+      status.setAttribute(
+        "role",
+        "status"
+      );
+
+      status.setAttribute(
+        "aria-live",
+        "polite"
+      );
+
+      const message =
+        document.createElement(
+          "p"
+        );
+
+      message.className =
+        "pkl-contribution-admin__loading-text";
+
+      message.textContent =
+        "Carregando semana atual...";
+
+      status.appendChild(
+        message
+      );
+
+      status.appendChild(
+        UI.Skeleton({
+          lines: 5,
+        })
+      );
+
+      content.appendChild(
+        status
+      );
+    }
+
+    function renderLoadError_(
+      content,
+      generation,
+      options
+    ) {
+      const retryButton =
+        UI.Button({
+          label:
+            "Tentar novamente",
+          variant:
+            "secondary",
+          type:
+            "button",
+        });
+
+      retryButton.addEventListener(
+        "click",
+        () => {
+          renderLoading_(
+            content
+          );
+
+          loadCurrentWeek_(
+            content,
+            generation,
+            options
+          );
+        }
+      );
+
+      const emptyState =
+        UI.EmptyState({
+          title:
+            "Não foi possível carregar a semana",
+          description:
+            "Tente novamente.",
+          action:
+            retryButton,
+        });
+
+      content.replaceChildren(
+        emptyState.element
+      );
+    }
+
+    function renderWeek_(
+      content,
+      week
+    ) {
+      content.replaceChildren();
+
+      const wrapper =
+        document.createElement(
+          "div"
+        );
+
+      wrapper.className =
+        "pkl-contribution-admin__week";
+
+      wrapper.appendChild(
+        createWeekPeriod_(
+          week
+        )
+      );
+
+      wrapper.appendChild(
+        createSummary_(
+          week
+        )
+      );
+
+      if (
+        week.members.length ===
+        0
+      ) {
+        const emptyState =
+          UI.EmptyState({
+            title:
+              "Nenhum membro nesta semana",
+            description:
+              "Não existem participantes relevantes para a semana atual.",
+          });
+
+        wrapper.appendChild(
+          emptyState.element
+        );
+
+        content.appendChild(
+          wrapper
+        );
+
+        return;
+      }
+
+      wrapper.appendChild(
+        createDesktopTable_(
+          week.members
+        )
+      );
+
+      wrapper.appendChild(
+        createMobileList_(
+          week.members
+        )
+      );
+
+      content.appendChild(
+        wrapper
+      );
+    }
+
+    function createWeekPeriod_(
+      week
+    ) {
+      const container =
+        document.createElement(
+          "div"
+        );
+
+      container.className =
+        "pkl-contribution-admin__period";
+
+      const label =
+        document.createElement(
+          "span"
+        );
+
+      label.className =
+        "pkl-contribution-admin__period-label";
+
+      label.textContent =
+        "Período da semana";
+
+      const value =
+        document.createElement(
+          "strong"
+        );
+
+      value.className =
+        "pkl-contribution-admin__period-value";
+
+      value.textContent =
+        formatWeekPeriod_(
+          week.weekStart,
+          week.weekEnd
+        );
+
+      container.appendChild(
+        label
+      );
+
+      container.appendChild(
+        value
+      );
+
+      return container;
+    }
+
+    function createSummary_(
+      week
+    ) {
+      const container =
+        document.createElement(
+          "div"
+        );
+
+      container.className =
+        "pkl-contribution-admin__summary";
+
+      [
+        {
+          label:
+            "Meta diária",
+          value:
+            UtilitiesClient.formatGameMoney(
+              week.dailyTarget
+            ),
+        },
+        {
+          label:
+            "Meta coletiva",
+          value:
+            UtilitiesClient.formatGameMoney(
+              week.collectiveTarget
+            ),
+        },
+        {
+          label:
+            "Total contribuído",
+          value:
+            UtilitiesClient.formatGameMoney(
+              week.totalContributed
+            ),
+        },
+        {
+          label:
+            "Participantes",
+          value:
+            String(
+              week.members.length
+            ),
+        },
+      ].forEach(
+        function (item) {
+          container.appendChild(
+            UI.StatCard(
+              item
+            ).element
+          );
+        }
+      );
+
+      return container;
+    }
+
+    function createDesktopTable_(
+      members
+    ) {
+      const rows =
+        members.map(
+          function (member) {
+            return {
+              name:
+                createMemberIdentity_(
+                  member
+                ),
+
+              guildRole:
+                getGuildRoleLabel_(
+                  member.guildRole
+                ),
+
+              level:
+                String(
+                  member.level
+                ),
+
+              amount:
+                createAmountDisplay_(
+                  member.amount
+                ),
+
+              target:
+                createTargetDisplay_(
+                  member
+                ),
+
+              status:
+                createMemberStatusBadge_(
+                  member.status
+                ),
+            };
+          }
+        );
+
+      const table =
+        UI.Table({
+          caption:
+            "Contribuição semanal de membros",
+
+          columns: [
+            {
+              key:
+                "name",
+              label:
+                "Nome",
+            },
+            {
+              key:
+                "guildRole",
+              label:
+                "Cargo",
+            },
+            {
+              key:
+                "level",
+              label:
+                "Nível",
+            },
+            {
+              key:
+                "amount",
+              label:
+                "Contribuição",
+            },
+            {
+              key:
+                "target",
+              label:
+                "Meta",
+            },
+            {
+              key:
+                "status",
+              label:
+                "Status",
+            },
+          ],
+
+          rows:
+            rows,
+        });
+
+      table.element.classList.add(
+        "pkl-contribution-admin__desktop"
+      );
+
+      members.forEach(
+        function (member, index) {
+          const row =
+            table.table.tBodies[0]
+              .rows[index];
+
+          if (!row) {
+            return;
+          }
+
+          row.dataset.memberId =
+            member.memberId;
+
+          row.classList.add(
+            "pkl-contribution-row"
+          );
+        }
+      );
+
+      return table.element;
+    }
+
+    function createMobileList_(
+      members
+    ) {
+      const container =
+        document.createElement(
+          "div"
+        );
+
+      container.className =
+        "pkl-contribution-admin__mobile";
+
+      container.setAttribute(
+        "aria-label",
+        "Contribuição semanal de membros"
+      );
+
+      members.forEach(
+        function (member) {
+          container.appendChild(
+            createMobileCard_(
+              member
+            )
+          );
+        }
+      );
+
+      return container;
+    }
+
+    function createMobileCard_(
+      member
+    ) {
+      const card =
+        document.createElement(
+          "article"
+        );
+
+      card.className =
+        "pkl-contribution-card";
+
+      card.dataset.memberId =
+        member.memberId;
+
+      const header =
+        document.createElement(
+          "div"
+        );
+
+      header.className =
+        "pkl-contribution-card__header";
+
+      header.appendChild(
+        createMemberIdentity_(
+          member
+        )
+      );
+
+      header.appendChild(
+        createMemberStatusBadge_(
+          member.status
+        )
+      );
+
+      const role =
+        document.createElement(
+          "div"
+        );
+
+      role.className =
+        "pkl-contribution-card__role";
+
+      role.textContent =
+        getGuildRoleLabel_(
+          member.guildRole
+        );
+
+      const fields =
+        document.createElement(
+          "div"
+        );
+
+      fields.className =
+        "pkl-contribution-card__fields";
+
+      fields.appendChild(
+        createMobileField_(
+          "Nível",
+          document.createTextNode(
+            String(
+              member.level
+            )
+          )
+        )
+      );
+
+      fields.appendChild(
+        createMobileField_(
+          "Contribuição",
+          createAmountDisplay_(
+            member.amount
+          )
+        )
+      );
+
+      const target =
+        document.createElement(
+          "div"
+        );
+
+      target.className =
+        "pkl-contribution-card__target";
+
+      const targetLabel =
+        document.createElement(
+          "span"
+        );
+
+      targetLabel.textContent =
+        "Meta";
+
+      target.appendChild(
+        targetLabel
+      );
+
+      target.appendChild(
+        createTargetDisplay_(
+          member
+        )
+      );
+
+      card.appendChild(
+        header
+      );
+
+      card.appendChild(
+        role
+      );
+
+      card.appendChild(
+        fields
+      );
+
+      card.appendChild(
+        target
+      );
+
+      return card;
+    }
+
+    function createMobileField_(
+      labelText,
+      control
+    ) {
+      const field =
+        document.createElement(
+          "div"
+        );
+
+      field.className =
+        "pkl-contribution-card__field";
+
+      const label =
+        document.createElement(
+          "span"
+        );
+
+      label.className =
+        "pkl-contribution-card__field-label";
+
+      label.textContent =
+        labelText;
+
+      field.appendChild(
+        label
+      );
+
+      field.appendChild(
+        control
+      );
+
+      return field;
+    }
+
+    function createAmountDisplay_(
+      amount
+    ) {
+      const wrapper =
+        document.createElement(
+          "span"
+        );
+
+      wrapper.className =
+        "pkl-contribution-admin__money";
+
+      const prefix =
+        document.createElement(
+          "span"
+        );
+
+      prefix.className =
+        "pkl-contribution-admin__money-prefix";
+
+      prefix.setAttribute(
+        "aria-hidden",
+        "true"
+      );
+
+      prefix.textContent =
+        "$";
+
+      const value =
+        document.createElement(
+          "span"
+        );
+
+      value.textContent =
+        String(
+          amount
+        );
+
+      wrapper.appendChild(
+        prefix
+      );
+
+      wrapper.appendChild(
+        value
+      );
+
+      return wrapper;
+    }
+
+    function createMemberIdentity_(
+      member
+    ) {
+      const container =
+        document.createElement(
+          "div"
+        );
+
+      container.className =
+        "pkl-contribution-member";
+
+      const name =
+        document.createElement(
+          "strong"
+        );
+
+      name.className =
+        "pkl-contribution-member__name";
+
+      name.textContent =
+        member.name;
+
+      container.appendChild(
+        name
+      );
+
+      return container;
+    }
+
+    function createTargetDisplay_(
+      member
+    ) {
+      if (
+        member.targetRequired ===
+        false
+      ) {
+        return UI.Badge({
+          label:
+            "Sem obrigação",
+          variant:
+            "neutral",
+        });
+      }
+
+      if (
+        member.targetRequired !==
+        true
+      ) {
+        throw new Error(
+          "Estado de meta inválido."
+        );
+      }
+
+      const value =
+        document.createElement(
+          "span"
+        );
+
+      value.className =
+        "pkl-contribution-admin__target-value";
+
+      value.textContent =
+        UtilitiesClient.formatGameMoney(
+          member.targetAmount
+        );
+
+      return value;
+    }
+
+    function createMemberStatusBadge_(
+      status
+    ) {
+      if (
+        status === "ACTIVE"
+      ) {
+        return UI.Badge({
+          label:
+            "Ativo",
+          variant:
+            "success",
+        });
+      }
+
+      if (
+        status === "INACTIVE"
+      ) {
+        return UI.Badge({
+          label:
+            "Inativo",
+          variant:
+            "neutral",
+        });
+      }
+
+      throw new Error(
+        `Status de membro desconhecido: ${status}.`
+      );
+    }
+
+    function getGuildRoleLabel_(
+      guildRole
+    ) {
+      switch (
+        guildRole
+      ) {
+        case "LEADER":
+          return "Líder";
+
+        case "VICE_LEADER":
+          return "Vice-líder";
+
+        case "MEMBER":
+          return "Membro";
+
+        default:
+          throw new Error(
+            `Cargo de membro desconhecido: ${guildRole}.`
+          );
+      }
+    }
+
+    function formatWeekPeriod_(
+      weekStart,
+      weekEnd
+    ) {
+      return (
+        formatOfficialDateTime_(
+          weekStart
+        ) +
+        " até " +
+        formatOfficialDateTime_(
+          weekEnd
+        )
+      );
+    }
+
+    function formatOfficialDateTime_(
+      value
+    ) {
+      const date =
+        new Date(
+          value
+        );
+
+      if (
+        Number.isNaN(
+          date.getTime()
+        )
+      ) {
+        throw new Error(
+          "Datetime inválido recebido da API."
+        );
+      }
+
+      const app =
+        State.get().app;
+
+      if (
+        !app ||
+        typeof app.timezone !==
+          "string" ||
+        app.timezone.trim() ===
+          ""
+      ) {
+        throw new Error(
+          "Timezone oficial indisponível."
+        );
+      }
+
+      return new Intl.DateTimeFormat(
+        "pt-BR",
+        {
+          timeZone:
+            app.timezone,
+
+          day:
+            "2-digit",
+
+          month:
+            "2-digit",
+
+          year:
+            "numeric",
+
+          hour:
+            "2-digit",
+
+          minute:
+            "2-digit",
+
+          hour12:
+            false,
+        }
+      ).format(
+        date
+      );
+    }
+
+    function validateWeekDto_(
+      week
+    ) {
+      if (
+        !week ||
+        typeof week !==
+          "object" ||
+        Array.isArray(
+          week
+        )
+      ) {
+        throw new Error(
+          "Resposta semanal inválida."
+        );
+      }
+
+      if (
+        typeof week.weekKey !==
+          "string" ||
+        typeof week.weekStart !==
+          "string" ||
+        typeof week.weekEnd !==
+          "string"
+      ) {
+        throw new Error(
+          "Período semanal inválido."
+        );
+      }
+
+      [
+        "dailyTarget",
+        "collectiveTarget",
+        "totalContributed",
+      ].forEach(
+        function (fieldName) {
+          if (
+            !Number.isSafeInteger(
+              week[fieldName]
+            ) ||
+            week[fieldName] <
+              0
+          ) {
+            throw new Error(
+              `Campo semanal inválido: ${fieldName}.`
+            );
+          }
+        }
+      );
+
+      if (
+        !Array.isArray(
+          week.members
+        )
+      ) {
+        throw new Error(
+          "Lista semanal de membros inválida."
+        );
+      }
+
+      week.members.forEach(
+        validateWeekMember_
+      );
+
+      return week;
+    }
+
+    function validateWeekMember_(
+      member
+    ) {
+      if (
+        !member ||
+        typeof member !==
+          "object" ||
+        Array.isArray(
+          member
+        )
+      ) {
+        throw new Error(
+          "Membro semanal inválido."
+        );
+      }
+
+      if (
+        typeof member.memberId !==
+          "string" ||
+        member.memberId.trim() ===
+          "" ||
+        typeof member.name !==
+          "string" ||
+        member.name.trim() ===
+          ""
+      ) {
+        throw new Error(
+          "Identidade de membro semanal inválida."
+        );
+      }
+
+      if (
+        !Number.isSafeInteger(
+          member.level
+        ) ||
+        member.level < 0 ||
+        !Number.isSafeInteger(
+          member.amount
+        ) ||
+        member.amount < 0 ||
+        !Number.isSafeInteger(
+          member.targetAmount
+        ) ||
+        member.targetAmount < 0
+      ) {
+        throw new Error(
+          "Valores de membro semanal inválidos."
+        );
+      }
+
+      if (
+        typeof member.targetRequired !==
+          "boolean"
+      ) {
+        throw new Error(
+          "Snapshot de meta semanal inválido."
+        );
+      }
+
+      return member;
+    }
+
+    return {
+      render,
+      refresh,
+    };
+  })();
+</script>

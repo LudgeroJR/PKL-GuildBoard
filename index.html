@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <base target="_top" />
+
+    <?!= includeFile_('Styles'); ?>
+  </head>
+
+  <body>
+    <div id="pkl-app" class="pkl-app">
+      <header class="pkl-shell-header">
+        <div class="pkl-shell-container pkl-shell-header__inner">
+          <div class="pkl-shell-brand" id="pkl-shell-brand" aria-label="PKL GuildBoard">
+            <img
+              id="pkl-guild-logo"
+              class="pkl-shell-brand__logo is-hidden"
+              alt=""
+              decoding="async"
+            />
+
+            <span class="pkl-shell-brand__text">
+              <strong class="pkl-shell-brand__product"> PKL GuildBoard </strong>
+
+              <span class="pkl-shell-brand__guild" id="pkl-guild-name"></span>
+            </span>
+          </div>
+
+          <nav class="pkl-nav pkl-nav--top" aria-label="Navegação principal">
+            <a class="pkl-nav__link" href="#/" data-pkl-route="#/">
+              <span
+                class="pkl-nav__icon"
+                data-pkl-icon="house"
+                aria-hidden="true"
+              ></span>
+
+              <span>Início</span>
+            </a>
+
+            <a class="pkl-nav__link" href="#/guild" data-pkl-route="#/guild">
+              <span
+                class="pkl-nav__icon"
+                data-pkl-icon="shield"
+                aria-hidden="true"
+              ></span>
+
+              <span>Guild</span>
+            </a>
+
+            <a class="pkl-nav__link" href="#/podex" data-pkl-route="#/podex">
+              <span
+                class="pkl-nav__icon"
+                data-pkl-icon="book-open"
+                aria-hidden="true"
+              ></span>
+
+              <span>Podex</span>
+            </a>
+
+            <a class="pkl-nav__link" href="#/admin" data-pkl-route="#/admin">
+              <span
+                class="pkl-nav__icon"
+                data-pkl-icon="shield"
+                aria-hidden="true"
+              ></span>
+
+              <span>Admin</span>
+            </a>
+          </nav>
+
+          <div class="pkl-shell-game-mark">
+            <span class="pkl-shell-game-mark__label">
+              Feito para jogadores de
+            </span>
+
+            <img
+              id="pkl-poke-legends-logo"
+              class="pkl-shell-game-mark__logo is-hidden"
+              alt="Poke Legends"
+              decoding="async"
+            />
+          </div>
+        </div>
+      </header>
+
+      <main class="pkl-shell-main pkl-shell-container">
+        <div
+          id="pkl-loading-root"
+          class="pkl-status"
+          role="status"
+          aria-live="polite"
+        >
+          Carregando PKL GuildBoard...
+        </div>
+
+        <div
+          id="pkl-error-root"
+          class="pkl-status pkl-status--error is-hidden"
+          role="alert"
+        ></div>
+
+        <div id="pkl-page-root" tabindex="-1"></div>
+      </main>
+
+      <nav class="pkl-nav pkl-nav--bottom" aria-label="Navegação principal">
+        <a class="pkl-nav__link" href="#/" data-pkl-route="#/">
+          <span
+            class="pkl-nav__icon"
+            data-pkl-icon="house"
+            aria-hidden="true"
+          ></span>
+
+          <span>Início</span>
+        </a>
+
+        <a class="pkl-nav__link" href="#/guild" data-pkl-route="#/guild">
+          <span
+            class="pkl-nav__icon"
+            data-pkl-icon="shield"
+            aria-hidden="true"
+          ></span>
+
+          <span>Guild</span>
+        </a>
+
+        <a class="pkl-nav__link" href="#/podex" data-pkl-route="#/podex">
+          <span
+            class="pkl-nav__icon"
+            data-pkl-icon="book-open"
+            aria-hidden="true"
+          ></span>
+
+          <span>Podex</span>
+        </a>
+      </nav>
+    </div>
+
+    <?!= includeFile_('State'); ?> <?!= includeFile_('ApiClient'); ?> <?!=
+    includeFile_('UtilitiesClient'); ?> <?!= includeFile_('Components'); ?> <?!=
+    includeFile_('RankingView'); ?> <?!= includeFile_('HomeView'); ?> <?!=
+    includeFile_('GuildView'); ?> <?!= includeFile_('PodexCalculatorLogic'); ?>
+    <?!= includeFile_('PodexView'); ?> <?!= includeFile_('MemberAdminView'); ?>
+    <?!= includeFile_('ContributionAdminView'); ?> <?!=
+    includeFile_('GuildAdminView'); ?> <?!=
+    includeFile_('SkillProgressionAdminView'); ?> <?!=
+    includeFile_('SkillAdminView'); ?> <?!=
+    includeFile_('PodexImportAdminView'); ?> <?!=
+    includeFile_('PodexAdminView'); ?> <?!= includeFile_('AdminView'); ?> <?!=
+    includeFile_('Router'); ?> <?!= includeFile_('AppClient'); ?>
+  </body>
+</html>

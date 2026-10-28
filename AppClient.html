@@ -1,0 +1,149 @@
+<script>
+  const AppClient = (() => {
+    let isStarting = false;
+
+    async function start() {
+      if (isStarting) {
+        return;
+      }
+
+      isStarting = true;
+
+      showLoading_();
+      hideError_();
+
+      State.restoreAuth();
+
+      try {
+        const app = await ApiClient.requestPublic("app.bootstrap");
+
+        State.setApp(app);
+        applyPublicBranding_(app);
+
+        setLoadingMessage_("Preparando interface...");
+
+        document.dispatchEvent(
+          new CustomEvent("pkl:bootstrap-ready", {
+            detail: app,
+          }),
+        );
+      } catch (error) {
+        State.setApp(null);
+        hideLoading_();
+        showBootstrapError_();
+      } finally {
+        isStarting = false;
+      }
+    }
+
+    function applyPublicBranding_(app) {
+      const branding = app && typeof app === "object" ? app : {};
+
+      applyBrandImage_("pkl-guild-logo", branding.guildLogoUrl);
+
+      applyBrandImage_("pkl-poke-legends-logo", branding.pokeLegendsLogoUrl);
+
+      const guildNameEl = document.getElementById("pkl-guild-name");
+      if (guildNameEl && branding.guildName) {
+        guildNameEl.textContent = branding.guildName;
+        const brand = document.getElementById("pkl-shell-brand");
+        if (brand) brand.setAttribute("aria-label", "PKL GuildBoard — " + branding.guildName);
+      }
+    }
+
+    function applyBrandImage_(elementId, imageUrl) {
+      const image = document.getElementById(elementId);
+
+      if (!image) {
+        return;
+      }
+
+      if (typeof imageUrl !== "string" || imageUrl.trim() === "") {
+        image.removeAttribute("src");
+        image.classList.add("is-hidden");
+        return;
+      }
+
+      image.onload = () => {
+        image.classList.remove("is-hidden");
+      };
+
+      image.onerror = () => {
+        image.classList.add("is-hidden");
+        image.removeAttribute("src");
+      };
+
+      image.src = imageUrl.trim();
+    }
+
+    function showLoading_() {
+      const loadingRoot = document.getElementById("pkl-loading-root");
+
+      if (!loadingRoot) {
+        return;
+      }
+
+      loadingRoot.textContent = "Carregando PKL GuildBoard...";
+
+      loadingRoot.classList.remove("is-hidden");
+    }
+
+    function hideLoading_() {
+      const loadingRoot = document.getElementById("pkl-loading-root");
+
+      if (loadingRoot) {
+        loadingRoot.classList.add("is-hidden");
+      }
+    }
+
+    function setLoadingMessage_(message) {
+      const loadingRoot = document.getElementById("pkl-loading-root");
+
+      if (loadingRoot) {
+        loadingRoot.textContent = message;
+      }
+    }
+
+    function hideError_() {
+      const errorRoot = document.getElementById("pkl-error-root");
+
+      if (!errorRoot) {
+        return;
+      }
+
+      errorRoot.replaceChildren();
+      errorRoot.classList.add("is-hidden");
+    }
+
+    function showBootstrapError_() {
+      const errorRoot = document.getElementById("pkl-error-root");
+
+      if (!errorRoot) {
+        return;
+      }
+
+      const message = document.createElement("p");
+
+      message.textContent =
+        "Não foi possível carregar o PKL GuildBoard. Tente novamente.";
+
+      const retryButton = UI.Button({
+        label: "Tentar novamente",
+        variant: "primary",
+        onClick: start,
+      });
+
+      errorRoot.replaceChildren(message, retryButton);
+
+      errorRoot.classList.remove("is-hidden");
+    }
+
+    document.addEventListener("pkl:route-rendered", hideLoading_);
+
+    document.addEventListener("DOMContentLoaded", start);
+
+    return {
+      start,
+    };
+  })();
+</script>

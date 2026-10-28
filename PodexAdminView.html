@@ -1,0 +1,675 @@
+<script>
+  const PodexAdminView = (() => {
+    const ORIGIN_TYPES = Object.freeze([
+      {value: 'POKEMON', label: 'Pokémon'},
+      {value: 'TYPE',    label: 'Tipagem'},
+      {value: 'OTHER',   label: 'Outra origem'},
+    ]);
+
+    function render(options = {}) {
+      const root = document.createElement('section');
+      root.className = 'pkl-podex-admin';
+      root.setAttribute('aria-label', 'Administração do Podex');
+      window.queueMicrotask(() => load_(root, options));
+      return root;
+    }
+
+    async function load_(root, options, activeIndex = 0) {
+      if (!root.isConnected) return;
+      root.setAttribute('aria-busy', 'true');
+      const status = document.createElement('p');
+      status.className = 'pkl-status'; status.setAttribute('role', 'status');
+      status.textContent = 'Carregando Podex...';
+      const loading = document.createElement('div');
+      loading.className = 'pkl-podex-admin__loading';
+      loading.append(status, UI.Skeleton({lines: 6}));
+      root.replaceChildren(loading);
+      try {
+        const catalog = await ApiClient.request('podex.getAdminCatalog', {});
+        if (!root.isConnected) return;
+        const tabs = UI.Tabs({
+          ariaLabel: 'Seções do Podex',
+          activeIndex,
+          tabs: [
+            {label: 'Estrutura', content: buildEstruturaPanel_(catalog, options, () => load_(root, options))},
+            {label: 'Itens',     content: buildItensPanel_(catalog, options)},
+            {label: 'Importação', content: PodexImportAdminView.render({
+              onAuthRequired: options.onAuthRequired,
+              onImported: () => load_(root, options, 2),
+            })},
+          ],
+        });
+        root.replaceChildren(tabs.element);
+      } catch (err) {
+        if (!root.isConnected) return;
+        if (handleAuth_(err, options)) return;
+        const retry = UI.Button({label: 'Tentar novamente', variant: 'secondary', onClick: () => load_(root, options)});
+        const empty = UI.EmptyState({
+          title: 'Não foi possível carregar o Podex',
+          description: 'Tente novamente para consultar os dados atuais.',
+          action: retry,
+        });
+        empty.element.setAttribute('role', 'alert');
+        root.replaceChildren(empty.element);
+        retry.focus();
+      } finally {
+        root.removeAttribute('aria-busy');
+      }
+    }
+
+    // =========================================================================
+    // ESTRUTURA
+    // =========================================================================
+
+    function buildEstruturaPanel_(catalog, options, reload) {
+      const root = document.createElement('section');
+      root.className = 'pkl-podex-estrutura';
+
+      const topBar = document.createElement('div');
+      topBar.className = 'pkl-podex-estrutura__top-bar';
+      const addCatBtn = UI.Button({label: 'Nova categoria', variant: 'secondary', onClick: () => openForm_(null, 'category', null)});
+      topBar.appendChild(addCatBtn);
+
+      const layout = document.createElement('div');
+      layout.className = 'pkl-podex-estrutura__layout';
+      const treeCol = document.createElement('div');
+      treeCol.className = 'pkl-podex-estrutura__tree-col';
+      const panelCol = document.createElement('div');
+      panelCol.className = 'pkl-podex-estrutura__panel-col';
+      panelCol.hidden = true;
+      layout.append(treeCol, panelCol);
+      root.append(topBar, layout);
+
+      let panelIsDirty = () => false;
+
+      renderTree_();
+
+      function renderTree_() {
+        treeCol.replaceChildren();
+        if (!catalog.categories.length) {
+          const first = UI.Button({label: 'Cadastrar primeira categoria', onClick: () => openForm_(null, 'category', null)});
+          treeCol.appendChild(UI.EmptyState({
+            title: 'Nenhuma categoria cadastrada',
+            description: 'Adicione a primeira categoria para começar.',
+            action: first,
+          }).element);
+          return;
+        }
+        const ul = document.createElement('ul');
+        ul.className = 'pkl-podex-tree'; ul.setAttribute('role', 'tree');
+        [...catalog.categories].sort((a, b) => a.sortOrder - b.sortOrder).forEach(cat => ul.appendChild(buildCatNode_(cat)));
+        treeCol.appendChild(ul);
+      }
+
+      function buildCatNode_(cat) {
+        const li = mkTreeItem_('category');
+        li.appendChild(mkRow_(cat.name, [
+          mkGhostBtn_(`Editar categoria ${cat.name}`, 'Editar',     () => openForm_(cat, 'category', null)),
+          mkGhostBtn_(`Adicionar subcategoria em ${cat.name}`, '+ Sub', () => openForm_(null, 'subcategory', cat.categoryId)),
+          mkDangerBtn_(`Remover categoria ${cat.name}`,              () => deleteEntity_(cat.categoryId, 'category', cat.name)),
+        ]));
+        const subs = catalog.subcategories.filter(s => s.categoryId === cat.categoryId).sort((a, b) => a.sortOrder - b.sortOrder);
+        if (subs.length) { const ul = mkChildList_(); subs.forEach(s => ul.appendChild(buildSubNode_(s))); li.appendChild(ul); }
+        return li;
+      }
+
+      function buildSubNode_(sub) {
+        const li = mkTreeItem_('subcategory');
+        li.appendChild(mkRow_(sub.name, [
+          mkGhostBtn_(`Editar subcategoria ${sub.name}`, 'Editar',       () => openForm_(sub, 'subcategory', sub.categoryId)),
+          mkGhostBtn_(`Adicionar raridade em ${sub.name}`, '+ Raridade', () => openForm_(null, 'rarity', sub.subcategoryId)),
+          mkDangerBtn_(`Remover subcategoria ${sub.name}`,               () => deleteEntity_(sub.subcategoryId, 'subcategory', sub.name)),
+        ]));
+        const rars = catalog.rarities.filter(r => r.subcategoryId === sub.subcategoryId).sort((a, b) => a.sortOrder - b.sortOrder);
+        if (rars.length) { const ul = mkChildList_(); rars.forEach(r => ul.appendChild(buildRarNode_(r))); li.appendChild(ul); }
+        return li;
+      }
+
+      function buildRarNode_(rar) {
+        const li = mkTreeItem_('rarity');
+        li.appendChild(mkRow_(rar.name, [
+          mkGhostBtn_(`Editar raridade ${rar.name}`, 'Editar', () => openForm_(rar, 'rarity', rar.subcategoryId)),
+          mkDangerBtn_(`Remover raridade ${rar.name}`,         () => deleteEntity_(rar.rarityId, 'rarity', rar.name)),
+        ]));
+        const levels = catalog.levels.filter(l => l.rarityId === rar.rarityId).sort((a, b) => a.level - b.level);
+        if (levels.length) {
+          const ul = mkChildList_();
+          levels.forEach(level => {
+            const lvLi = document.createElement('li');
+            lvLi.className = 'pkl-podex-tree__level';
+            const btn = document.createElement('button');
+            btn.type = 'button'; btn.className = 'pkl-podex-tree__level-btn';
+            const reqCount = catalog.requirements.filter(r => r.podexLevelId === level.podexLevelId).length;
+            btn.textContent = `Nível ${level.level}`;
+            const badge = UI.Badge({label: String(reqCount), variant: 'neutral'});
+            badge.classList.add('pkl-podex-tree__req-badge');
+            btn.appendChild(badge);
+            btn.setAttribute('aria-label', `Requisitos do Nível ${level.level} de ${rar.name} — ${reqCount} requisito${reqCount !== 1 ? 's' : ''}`);
+            btn.addEventListener('click', () => openLevel_(level, rar));
+            lvLi.appendChild(btn); ul.appendChild(lvLi);
+          });
+          li.appendChild(ul);
+        }
+        return li;
+      }
+
+      async function openForm_(entity, type, parentId) {
+        if (panelIsDirty()) { if (!(await confirmDiscard_())) return; }
+        panelIsDirty = () => false;
+        const form = buildEntityForm_(entity, type, parentId, catalog, options, () => reload(), closePanel_);
+        panelCol.hidden = false;
+        panelCol.replaceChildren(form.element);
+        form.focus();
+        panelCol.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+      }
+
+      async function openLevel_(level, rarity) {
+        if (panelIsDirty()) { if (!(await confirmDiscard_())) return; }
+        const reqs = catalog.requirements.filter(r => r.podexLevelId === level.podexLevelId);
+        const editor = buildReqEditor_(level, rarity, reqs, catalog.items, options, reload);
+        panelIsDirty = editor.isDirty;
+        panelCol.hidden = false;
+        panelCol.replaceChildren(editor.element);
+        editor.focus();
+        panelCol.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+      }
+
+      function closePanel_() {
+        panelIsDirty = () => false;
+        panelCol.hidden = true;
+        panelCol.replaceChildren();
+      }
+
+      async function deleteEntity_(id, type, name) {
+        const label = typeLabelPt_(type);
+        const confirmed = await UI.ConfirmDialog({
+          title: `Remover ${label}?`,
+          message: `"${name}" será removida permanentemente. Esta ação não pode ser desfeita.`,
+          confirmLabel: `Remover ${label}`,
+          danger: true,
+        }).open();
+        if (!confirmed) return;
+        const actions = {category: 'podex.deleteCategory', subcategory: 'podex.deleteSubcategory', rarity: 'podex.deleteRarity'};
+        const idKeys = {category: 'categoryId', subcategory: 'subcategoryId', rarity: 'rarityId'};
+        try {
+          await ApiClient.request(actions[type], {[idKeys[type]]: id});
+          UI.Toast({variant: 'success', title: 'Removido', message: `"${name}" removida com sucesso.`});
+          reload();
+        } catch (err) {
+          if (handleAuth_(err, options)) return;
+          UI.Toast({variant: 'danger', title: 'Não foi possível remover', message: err && err.message ? err.message : 'Verifique as dependências.'});
+        }
+      }
+
+      return root;
+    }
+
+    // =========================================================================
+    // ENTITY FORM
+    // =========================================================================
+
+    function buildEntityForm_(entity, type, parentId, catalog, options, onSaved, onCancel) {
+      const isNew = !entity;
+      const title = {
+        category:    isNew ? 'Nova categoria'    : `Editar "${entity.name}"`,
+        subcategory: isNew ? 'Nova subcategoria' : `Editar "${entity.name}"`,
+        rarity:      isNew ? 'Nova raridade'     : `Editar "${entity.name}"`,
+      }[type];
+
+      const root = document.createElement('section');
+      root.className = 'pkl-podex-entity-form';
+      const titleEl = document.createElement('h3');
+      titleEl.className = 'pkl-podex-entity-form__title'; titleEl.textContent = title;
+
+      const form = document.createElement('form');
+      form.className = 'pkl-podex-entity-form__body'; form.noValidate = true;
+
+      const nameField = UI.Input({label: 'Nome', value: entity ? entity.name : '', required: true, autocomplete: 'off'});
+      const sortField = UI.Input({label: 'Ordem', type: 'number', value: entity ? String(entity.sortOrder) : '0', required: true});
+      sortField.input.min = '0'; sortField.input.step = '1'; sortField.input.inputMode = 'numeric';
+
+      let buffField = null;
+      if (type === 'rarity') {
+        buffField = UI.Input({
+          label: 'Buff de conclusão (opcional)',
+          value: entity && entity.completionBuff ? entity.completionBuff : '',
+          autocomplete: 'off',
+        });
+      }
+
+      let parentField = null;
+      if (!isNew && type !== 'category') {
+        const isSub = type === 'subcategory';
+        const catName = id => (catalog.categories.find(c => c.categoryId === id) || {}).name || '';
+        const parents = isSub
+          ? catalog.categories.map(c => ({value: c.categoryId, label: c.name}))
+          : catalog.subcategories.map(sc => ({value: sc.subcategoryId, label: `${catName(sc.categoryId)} › ${sc.name}`}));
+        parentField = UI.Select({
+          label: isSub ? 'Categoria' : 'Subcategoria',
+          required: true,
+          value: isSub ? entity.categoryId : entity.subcategoryId,
+          options: parents,
+          helperText: 'Altere para mover para outro pai.',
+        });
+      }
+
+      const errEl = mkErrorEl_();
+      const actions = document.createElement('div');
+      actions.className = 'pkl-podex-entity-form__actions';
+      const cancelBtn = UI.Button({label: 'Cancelar', variant: 'secondary', onClick: onCancel});
+      const submitBtn = UI.Button({label: isNew ? 'Cadastrar' : 'Salvar alterações', type: 'submit'});
+      actions.append(cancelBtn, submitBtn);
+
+      const fieldEls = [nameField.element, sortField.element];
+      if (parentField) fieldEls.push(parentField.element);
+      if (buffField) fieldEls.push(buffField.element);
+      fieldEls.push(errEl, actions);
+      form.append(...fieldEls);
+      root.append(titleEl, form);
+
+      form.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        const name = nameField.input.value.trim();
+        const sortOrder = parseInt(sortField.input.value, 10);
+        nameField.setError(null); sortField.setError(null);
+        let firstBad = null;
+        if (!name || name.length > 100) { nameField.setError('Informe um nome (1–100 caracteres).'); firstBad = firstBad || nameField.input; }
+        if (isNaN(sortOrder) || sortOrder < 0) { sortField.setError('Informe um número inteiro ≥ 0.'); firstBad = firstBad || sortField.input; }
+        if (firstBad) { firstBad.focus(); return; }
+
+        const payload = {name, sortOrder};
+        if (type === 'category') { if (!isNew) payload.categoryId = entity.categoryId; }
+        else if (type === 'subcategory') { payload.categoryId = parentField ? parentField.select.value : parentId; if (!isNew) payload.subcategoryId = entity.subcategoryId; }
+        else if (type === 'rarity') { payload.subcategoryId = parentField ? parentField.select.value : parentId; if (!isNew) payload.rarityId = entity.rarityId; if (buffField) payload.completionBuff = buffField.input.value.trim() || null; }
+
+        const actionMap = {
+          category:    isNew ? 'podex.createCategory'    : 'podex.updateCategory',
+          subcategory: isNew ? 'podex.createSubcategory' : 'podex.updateSubcategory',
+          rarity:      isNew ? 'podex.createRarity'      : 'podex.updateRarity',
+        };
+        UI.setButtonLoading(submitBtn, true, 'Salvando...'); errEl.hidden = true;
+        try {
+          await ApiClient.request(actionMap[type], payload);
+          UI.Toast({variant: 'success', title: 'Salvo', message: `"${name}" salvo com sucesso.`});
+          onSaved();
+        } catch (err) {
+          if (handleAuth_(err, options)) return;
+          errEl.textContent = err && err.message ? err.message : 'Não foi possível salvar.';
+          errEl.hidden = false; errEl.focus();
+        } finally {
+          if (root.isConnected) UI.setButtonLoading(submitBtn, false);
+        }
+      });
+
+      return {element: root, focus: () => nameField.input.focus()};
+    }
+
+    // =========================================================================
+    // REQUIREMENTS EDITOR
+    // =========================================================================
+
+    function buildReqEditor_(level, rarity, initialReqs, allItems, options, onSaved) {
+      let rows = initialReqs.map(r => ({podexRequirementId: r.podexRequirementId, itemId: r.itemId, quantity: r.quantity}));
+      const baseline = JSON.stringify(rows.map(r => ({itemId: r.itemId, quantity: r.quantity})));
+
+      const root = document.createElement('section');
+      root.className = 'pkl-podex-req-editor';
+      const titleEl = document.createElement('h3');
+      titleEl.className = 'pkl-podex-req-editor__title';
+      titleEl.textContent = (rarity ? rarity.name + ' — ' : '') + `Nível ${level.level}`;
+
+      const form = document.createElement('form');
+      form.className = 'pkl-podex-req-editor__form'; form.noValidate = true;
+      const rowsHost = document.createElement('div');
+      rowsHost.className = 'pkl-podex-req-editor__rows';
+      const errEl = mkErrorEl_();
+      const dirty = document.createElement('p');
+      dirty.className = 'pkl-podex-req-editor__dirty'; dirty.setAttribute('role', 'status'); dirty.setAttribute('aria-live', 'polite');
+      const footer = document.createElement('div');
+      footer.className = 'pkl-podex-req-editor__footer';
+      const addBtn = UI.Button({label: '+ Requisito', variant: 'secondary', onClick: addRow_});
+      const saveBtn = UI.Button({label: 'Salvar requisitos', type: 'submit'});
+      footer.append(addBtn, saveBtn);
+      form.append(rowsHost, errEl, dirty, footer);
+      root.append(titleEl, form);
+
+      renderRows_(); refresh_();
+
+      form.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        if (!isDirty_()) return;
+        errEl.hidden = true;
+        const requirements = rows.map(r => ({itemId: r.itemId, quantity: r.quantity}));
+        const itemIds = requirements.map(r => r.itemId).filter(Boolean);
+        if (new Set(itemIds).size !== itemIds.length) {
+          errEl.textContent = 'Há itens duplicados. Cada item deve aparecer no máximo uma vez por nível.';
+          errEl.hidden = false; errEl.focus(); return;
+        }
+        for (const req of requirements) {
+          if (!req.itemId) { errEl.textContent = 'Selecione o item para todos os requisitos.'; errEl.hidden = false; errEl.focus(); return; }
+          if (!Number.isInteger(req.quantity) || req.quantity < 1) { errEl.textContent = 'Quantidade deve ser um inteiro ≥ 1.'; errEl.hidden = false; errEl.focus(); return; }
+        }
+        UI.setButtonLoading(saveBtn, true, 'Salvando...');
+        try {
+          await ApiClient.request('podex.saveLevelRequirements', {podexLevelId: level.podexLevelId, requirements});
+          UI.Toast({variant: 'success', title: 'Requisitos salvos', message: `Nível ${level.level} atualizado.`});
+          onSaved();
+        } catch (err) {
+          if (handleAuth_(err, options)) return;
+          errEl.textContent = err && err.message ? err.message : 'Não foi possível salvar.';
+          errEl.hidden = false; errEl.focus();
+        } finally {
+          if (root.isConnected) UI.setButtonLoading(saveBtn, false);
+        }
+      });
+
+      function renderRows_() {
+        rowsHost.replaceChildren();
+        if (!rows.length) {
+          const empty = document.createElement('p');
+          empty.className = 'pkl-podex-req-editor__empty';
+          empty.textContent = 'Nenhum requisito configurado. Clique em "+ Requisito" para adicionar.';
+          rowsHost.appendChild(empty); return;
+        }
+        rows.forEach((row, index) => rowsHost.appendChild(buildRow_(row, index)));
+      }
+
+      function buildRow_(row, index) {
+        const el = document.createElement('div');
+        el.className = 'pkl-podex-req-row';
+
+        const itemWrap = document.createElement('div'); itemWrap.className = 'pkl-field';
+        const inputId = UtilitiesClient.createDomId('pkl-podex-item');
+        const listId  = UtilitiesClient.createDomId('pkl-podex-dl');
+        const itemLbl = document.createElement('label');
+        itemLbl.className = 'pkl-field__label'; itemLbl.htmlFor = inputId; itemLbl.textContent = 'Item';
+        const itemInput = document.createElement('input');
+        itemInput.type = 'text'; itemInput.id = inputId;
+        itemInput.className = 'pkl-input pkl-podex-req-row__item';
+        itemInput.autocomplete = 'off'; itemInput.setAttribute('list', listId);
+        itemInput.setAttribute('placeholder', 'Buscar item...'); itemInput.setAttribute('aria-autocomplete', 'list');
+        const dl = document.createElement('datalist'); dl.id = listId;
+        allItems.forEach(item => {
+          const opt = document.createElement('option');
+          opt.value = itemOptionValue_(item); dl.appendChild(opt);
+        });
+        const currentItem = allItems.find(i => i.itemId === row.itemId);
+        if (currentItem) itemInput.value = itemOptionValue_(currentItem);
+
+        function syncItem_() {
+          const matched = allItems.find(i => itemOptionValue_(i) === itemInput.value.trim());
+          row.itemId = matched ? matched.itemId : ''; refresh_();
+        }
+        itemInput.addEventListener('change', syncItem_);
+        itemInput.addEventListener('input', syncItem_);
+
+        const ctrl = document.createElement('div'); ctrl.className = 'pkl-field__control';
+        ctrl.append(itemInput, dl);
+        itemWrap.append(itemLbl, ctrl);
+
+        const qtyField = UI.Input({label: 'Qtd', type: 'number', value: String(row.quantity), required: true});
+        qtyField.input.className += ' pkl-podex-req-row__qty';
+        qtyField.input.min = '1'; qtyField.input.step = '1'; qtyField.input.inputMode = 'numeric';
+        qtyField.input.addEventListener('input', () => {
+          const v = parseInt(qtyField.input.value, 10); row.quantity = isNaN(v) ? 0 : v; refresh_();
+        });
+
+        const removeBtn = UI.Button({label: 'Remover', variant: 'ghost', onClick: () => { rows.splice(index, 1); renderRows_(); refresh_(); }});
+        removeBtn.setAttribute('aria-label', `Remover requisito ${index + 1}`);
+        el.append(itemWrap, qtyField.element, removeBtn);
+        return el;
+      }
+
+      function addRow_() {
+        rows.push({podexRequirementId: null, itemId: '', quantity: 1});
+        renderRows_(); refresh_();
+        const inputs = rowsHost.querySelectorAll('.pkl-podex-req-row__item');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      }
+
+      function isDirty_() { return JSON.stringify(rows.map(r => ({itemId: r.itemId, quantity: r.quantity}))) !== baseline; }
+
+      function refresh_() {
+        dirty.textContent = isDirty_() ? 'Há alterações não salvas.' : 'Nenhuma alteração pendente.';
+        saveBtn.disabled = !isDirty_();
+      }
+
+      return {element: root, isDirty: isDirty_, focus: () => addBtn.focus()};
+    }
+
+    // =========================================================================
+    // ITENS
+    // =========================================================================
+
+    function buildItensPanel_(catalog, options) {
+      const root = document.createElement('section');
+      root.className = 'pkl-podex-itens';
+      root.setAttribute('aria-label', 'Catálogo de itens do Podex');
+
+      let allItems = [...catalog.items];
+      let filteredItems = [...allItems];
+      let editor = null; let editorReturnFocus = null;
+
+      const topBar = document.createElement('div');
+      topBar.className = 'pkl-podex-itens__top-bar';
+      const searchField = UI.Input({label: 'Buscar item', placeholder: 'Nome ou origem...', autocomplete: 'off'});
+      const createBtn = UI.Button({label: 'Novo item', onClick: () => openEditor_(null)});
+      topBar.append(searchField.element, createBtn);
+
+      const listHost = document.createElement('div');
+      listHost.className = 'pkl-podex-itens__list';
+      const editorHost = document.createElement('div');
+      editorHost.className = 'pkl-podex-itens__editor-host'; editorHost.hidden = true;
+
+      root.append(topBar, listHost, editorHost);
+      renderList_();
+
+      searchField.input.addEventListener('input', () => {
+        const q = searchField.input.value.trim().toLowerCase();
+        filteredItems = allItems.filter(i => !q || i.name.toLowerCase().includes(q) || (i.origin || '').toLowerCase().includes(q));
+        renderList_();
+      });
+
+      function renderList_() {
+        if (!allItems.length) {
+          const first = UI.Button({label: 'Cadastrar primeiro item', onClick: () => openEditor_(null)});
+          listHost.replaceChildren(UI.EmptyState({title: 'Nenhum item cadastrado', description: 'Cadastre o primeiro item do catálogo.', action: first}).element);
+          return;
+        }
+        if (!filteredItems.length) {
+          listHost.replaceChildren(UI.EmptyState({title: 'Nenhum resultado', description: 'Tente outros termos de busca.'}).element);
+          return;
+        }
+        listHost.replaceChildren(buildDesktopTable_(), buildMobileCards_());
+      }
+
+      function buildDesktopTable_() {
+        const tbl = UI.Table({
+          caption: 'Itens do Podex',
+          columns: [
+            {key: 'name',    label: 'Nome'},
+            {key: 'type',    label: 'Tipo'},
+            {key: 'origin',  label: 'Origem'},
+            {key: 'actions', label: 'Ações', align: 'end'},
+          ],
+          rows: filteredItems.map(item => ({
+            name: item.name,
+            type: originTypeLabel_(item.originType),
+            origin: item.origin || '—',
+            actions: itemActionsEl_(item),
+          })),
+        });
+        tbl.element.classList.add('pkl-podex-itens__desktop');
+        return tbl.element;
+      }
+
+      function buildMobileCards_() {
+        const list = document.createElement('div');
+        list.className = 'pkl-podex-itens__mobile';
+        filteredItems.forEach(item => {
+          const card = document.createElement('article');
+          card.className = 'pkl-podex-item-card';
+          const head = document.createElement('div'); head.className = 'pkl-podex-item-card__head';
+          const name = document.createElement('strong'); name.className = 'pkl-podex-item-card__name'; name.textContent = item.name;
+          head.append(name, UI.Badge({label: originTypeLabel_(item.originType), variant: 'neutral'}));
+          const origin = document.createElement('p'); origin.className = 'pkl-podex-item-card__origin'; origin.textContent = item.origin || '—';
+          const acts = document.createElement('div'); acts.className = 'pkl-podex-item-card__actions'; acts.appendChild(itemActionsEl_(item));
+          card.append(head, origin, acts); list.appendChild(card);
+        });
+        return list;
+      }
+
+      function itemActionsEl_(item) {
+        const wrap = document.createElement('span');
+        wrap.className = 'pkl-podex-item-actions';
+        const editBtn = UI.Button({label: 'Editar', variant: 'secondary', onClick: () => openEditor_(item)});
+        editBtn.setAttribute('aria-label', `Editar ${item.name}`); editBtn.dataset.itemId = item.itemId;
+        const delBtn = UI.Button({label: 'Remover', variant: 'ghost', onClick: () => deleteItem_(item)});
+        delBtn.setAttribute('aria-label', `Remover ${item.name}`);
+        wrap.append(editBtn, delBtn);
+        return wrap;
+      }
+
+      function openEditor_(item) {
+        editorReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : createBtn;
+        editor = buildItemEditor_(item, options, onItemSaved_, closeEditor_);
+        editorHost.hidden = false; editorHost.replaceChildren(editor.element); editor.focus();
+        editorHost.scrollIntoView({behavior: 'smooth', block: 'start'});
+      }
+
+      function closeEditor_() {
+        editor = null; editorHost.hidden = true; editorHost.replaceChildren();
+        const focus = editorReturnFocus && editorReturnFocus.isConnected ? editorReturnFocus : createBtn;
+        editorReturnFocus = null; focus.focus();
+      }
+
+      function onItemSaved_(savedItem) {
+        const idx = allItems.findIndex(i => i.itemId === savedItem.itemId);
+        if (idx >= 0) allItems[idx] = savedItem; else allItems.push(savedItem);
+        catalog.items = allItems;
+        const q = searchField.input.value.trim().toLowerCase();
+        filteredItems = allItems.filter(i => !q || i.name.toLowerCase().includes(q) || (i.origin || '').toLowerCase().includes(q));
+        renderList_(); closeEditor_();
+        window.queueMicrotask(() => { const btn = listHost.querySelector(`[data-item-id="${savedItem.itemId}"]`); if (btn) btn.focus(); });
+      }
+
+      async function deleteItem_(item) {
+        const confirmed = await UI.ConfirmDialog({
+          title: 'Remover item?',
+          message: `"${item.name}" será removido permanentemente. Esta ação não pode ser desfeita.`,
+          confirmLabel: 'Remover item',
+          danger: true,
+        }).open();
+        if (!confirmed) return;
+        try {
+          await ApiClient.request('podex.deleteItem', {itemId: item.itemId});
+          allItems = allItems.filter(i => i.itemId !== item.itemId);
+          catalog.items = allItems;
+          filteredItems = filteredItems.filter(i => i.itemId !== item.itemId);
+          UI.Toast({variant: 'success', title: 'Removido', message: `"${item.name}" removido.`}); renderList_(); createBtn.focus();
+        } catch (err) {
+          if (handleAuth_(err, options)) return;
+          UI.Toast({variant: 'danger', title: 'Não foi possível remover', message: err && err.message ? err.message : 'Item pode estar em uso como requisito.'});
+        }
+      }
+
+      return root;
+    }
+
+    // =========================================================================
+    // ITEM EDITOR
+    // =========================================================================
+
+    function buildItemEditor_(item, options, onSaved, onCancel) {
+      const isNew = !item;
+      const root = document.createElement('section'); root.className = 'pkl-podex-item-editor';
+      const titleEl = document.createElement('h3'); titleEl.className = 'pkl-podex-item-editor__title';
+      titleEl.textContent = isNew ? 'Novo item' : `Editar "${item.name}"`;
+      const form = document.createElement('form'); form.className = 'pkl-podex-item-editor__form'; form.noValidate = true;
+      const nameField     = UI.Input({label: 'Nome',    value: item ? item.name : '', required: true, autocomplete: 'off'});
+      const typeField     = UI.Select({label: 'Tipo de origem', required: true, value: item ? item.originType : '', placeholder: 'Selecione o tipo', options: ORIGIN_TYPES});
+      const originField   = UI.Input({label: 'Origem',  value: item ? (item.origin || '') : '', required: true, autocomplete: 'off', helperText: 'Ex.: Charizard, Fogo'});
+      const imageUrlField = UI.Input({label: 'URL da imagem', value: item ? (item.imageUrl || '') : '', autocomplete: 'off', helperText: 'Opcional. URL absoluta da imagem do item.'});
+      const errEl = mkErrorEl_();
+      const actions = document.createElement('div'); actions.className = 'pkl-podex-item-editor__actions';
+      const cancelBtn = UI.Button({label: 'Cancelar', variant: 'secondary', onClick: onCancel});
+      const submitBtn  = UI.Button({label: isNew ? 'Cadastrar item' : 'Salvar alterações', type: 'submit'});
+      actions.append(cancelBtn, submitBtn);
+      form.append(nameField.element, typeField.element, originField.element, imageUrlField.element, errEl, actions);
+      root.append(titleEl, form);
+
+      form.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        const name       = nameField.input.value.trim();
+        const originType = typeField.select.value;
+        const origin     = originField.input.value.trim();
+        const imageUrl   = imageUrlField.input.value.trim() || null;
+        nameField.setError(null); typeField.setError(null); originField.setError(null); imageUrlField.setError(null);
+        let firstBad = null;
+        if (!name)       { nameField.setError('Informe o nome.');               firstBad = firstBad || nameField.input; }
+        if (!originType) { typeField.setError('Selecione o tipo de origem.');   firstBad = firstBad || typeField.select; }
+        if (!origin)     { originField.setError('Informe a origem.');           firstBad = firstBad || originField.input; }
+        if (firstBad) { firstBad.focus(); return; }
+        const payload = {name, originType, origin, imageUrl};
+        if (!isNew) payload.itemId = item.itemId;
+        UI.setButtonLoading(submitBtn, true, 'Salvando...'); errEl.hidden = true;
+        try {
+          const saved = await ApiClient.request(isNew ? 'podex.createItem' : 'podex.updateItem', payload);
+          UI.Toast({variant: 'success', title: isNew ? 'Item cadastrado' : 'Item atualizado', message: `"${saved.name}" salvo.`});
+          onSaved(saved);
+        } catch (err) {
+          if (handleAuth_(err, options)) return;
+          errEl.textContent = err && err.message ? err.message : 'Não foi possível salvar.';
+          errEl.hidden = false; errEl.focus();
+        } finally {
+          if (root.isConnected) UI.setButtonLoading(submitBtn, false);
+        }
+      });
+
+      return {element: root, focus: () => nameField.input.focus()};
+    }
+
+    // =========================================================================
+    // HELPERS
+    // =========================================================================
+
+    function mkTreeItem_(type) {
+      const li = document.createElement('li');
+      li.className = `pkl-podex-tree__item pkl-podex-tree__item--${type}`; li.setAttribute('role', 'treeitem'); li.setAttribute('aria-expanded', 'true'); return li;
+    }
+
+    function mkRow_(text, buttons) {
+      const row = document.createElement('div'); row.className = 'pkl-podex-tree__row';
+      const lbl = document.createElement('span'); lbl.className = 'pkl-podex-tree__label'; lbl.textContent = text;
+      const acts = document.createElement('span'); acts.className = 'pkl-podex-tree__actions'; acts.append(...buttons);
+      row.append(lbl, acts); return row;
+    }
+
+    function mkChildList_() {
+      const ul = document.createElement('ul'); ul.className = 'pkl-podex-tree__children'; ul.setAttribute('role', 'group'); return ul;
+    }
+
+    function mkGhostBtn_(ariaLabel, label, onClick) {
+      const btn = UI.Button({label, variant: 'ghost', onClick}); btn.setAttribute('aria-label', ariaLabel); return btn;
+    }
+
+    function mkDangerBtn_(ariaLabel, onClick) {
+      const btn = UI.Button({label: 'Remover', variant: 'ghost', onClick}); btn.setAttribute('aria-label', ariaLabel); btn.classList.add('pkl-podex-tree__danger-btn'); return btn;
+    }
+
+    function mkErrorEl_() {
+      const el = document.createElement('p'); el.className = 'pkl-status pkl-status--error'; el.setAttribute('role', 'alert'); el.tabIndex = -1; el.hidden = true; return el;
+    }
+
+    function confirmDiscard_() {
+      return UI.ConfirmDialog({title: 'Descartar alterações?', message: 'O painel atual possui alterações não salvas. Deseja descartá-las?', confirmLabel: 'Descartar', danger: true}).open();
+    }
+
+    function itemOptionValue_(item) { return `${item.name} — ${originTypeLabel_(item.originType)}: ${item.origin || ''}`; }
+    function originTypeLabel_(type) { const t = ORIGIN_TYPES.find(o => o.value === type); return t ? t.label : (type || ''); }
+    function typeLabelPt_(type) { return ({category: 'categoria', subcategory: 'subcategoria', rarity: 'raridade'})[type] || type; }
+    function handleAuth_(error, options) { if (!error || error.code !== 'AUTH_REQUIRED') return false; if (typeof options.onAuthRequired === 'function') options.onAuthRequired(); return true; }
+
+    return {render};
+  })();
+</script>
