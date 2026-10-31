@@ -269,7 +269,7 @@
 
         const controls = document.createElement('div');
         controls.className = 'pkl-guild-objective-admin__controls';
-        const selectedId = data.objective ? data.objective.skillId : '';
+        const selectedId = data.objective ? `${data.objective.skillId}:${data.objective.targetLevel}` : '';
         const selector = UI.Select({
           label: 'Habilidade objetivo',
           name: 'guildObjectiveSkillId',
@@ -282,7 +282,7 @@
             ? 'Somente habilidades com nível em progresso podem ser selecionadas.'
             : 'Os dados de habilidades precisam ser revisados antes de uma nova seleção.',
           options: data.candidates.map(candidate => ({
-            value: candidate.skillId,
+            value: `${candidate.skillId}:${candidate.targetLevel}`,
             label: `${candidate.name} — nível ${candidate.currentLevel} → ${candidate.targetLevel}`,
           })),
         });
@@ -311,9 +311,11 @@
         });
 
         saveButton.addEventListener('click', async () => {
-          const skillId = selector.select.value;
-          if (!skillId || loading) return;
-          const candidate = data.candidates.find(item => item.skillId === skillId);
+          const selected = selector.select.value;
+          if (!selected || loading) return;
+          const [skillId, targetText] = selected.split(':');
+          const targetLevel = Number(targetText);
+          const candidate = data.candidates.find(item => item.skillId === skillId && item.targetLevel === targetLevel);
           if (!candidate) {
             selector.setError('Selecione uma habilidade disponível.');
             selector.select.focus();
@@ -330,7 +332,7 @@
           });
           dialog.element.classList.add('pkl-guild-confirm');
           if (!await dialog.open() || !host.isConnected) return;
-          await mutate_(skillId, saveButton, changing ? 'Trocando...' : 'Definindo...');
+          await mutate_(skillId, targetLevel, saveButton, changing ? 'Trocando...' : 'Definindo...');
         });
 
         clearButton.addEventListener('click', async () => {
@@ -345,7 +347,7 @@
           });
           dialog.element.classList.add('pkl-guild-confirm');
           if (!await dialog.open() || !host.isConnected) return;
-          await mutate_(null, clearButton, 'Removendo...');
+          await mutate_(null, null, clearButton, 'Removendo...');
         });
 
         actions.append(saveButton, clearButton);
@@ -359,7 +361,7 @@
           body,
         }).element);
 
-        async function mutate_(skillId, button, loadingLabel) {
+        async function mutate_(skillId, targetLevel, button, loadingLabel) {
           if (loading || !host.isConnected) return;
           loading = true;
           refreshControls_();
@@ -371,7 +373,7 @@
           try {
             const updated = await ApiClient.request(
               'guild.setCurrentObjective',
-              {skillId},
+              {skillId, targetLevel},
             );
             if (!host.isConnected) return;
             validateObjectiveState_(updated);
@@ -518,7 +520,9 @@
           typeof candidate.name !== 'string' || candidate.name.trim() === '' ||
           !Number.isSafeInteger(candidate.currentLevel) || candidate.currentLevel < 0 ||
           !Number.isSafeInteger(candidate.targetLevel) ||
-          candidate.targetLevel !== candidate.currentLevel + 1 ||
+          candidate.targetLevel < candidate.currentLevel + 1 ||
+          !Number.isSafeInteger(candidate.maxTargetLevel) || candidate.targetLevel > candidate.maxTargetLevel ||
+          !Number.isSafeInteger(candidate.stepValue) || candidate.stepValue < 0 ||
           !Number.isSafeInteger(candidate.currentStep) || candidate.currentStep < 0 ||
           !Number.isSafeInteger(candidate.totalSteps) || candidate.totalSteps < 1 ||
           candidate.currentStep >= candidate.totalSteps ||
@@ -537,7 +541,8 @@
         !Number.isSafeInteger(objective[field]) || objective[field] < 0) ||
           typeof objective.progressPercent !== 'number' ||
           !Number.isFinite(objective.progressPercent) ||
-          objective.progressPercent < 0 || objective.progressPercent >= 100) {
+          objective.progressPercent < 0 || objective.progressPercent >= 100 ||
+          typeof objective.costConfigured !== 'boolean') {
         throw new Error('Objetivo atual inválido.');
       }
     }

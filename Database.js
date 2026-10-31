@@ -49,15 +49,31 @@ const DATABASE_SCHEMA_ = Object.freeze({
       "rankingHoje",
       "rankingOntem",
       "currentObjectiveSkillId",
+      "currentObjectiveTargetLevel",
       "createdAt",
       "updatedAt",
     ],
     "guildStateId",
   ),
 
+  GuildHistory: createDatabaseTableSchema_(
+    "GuildHistory",
+    [
+      "historyId",
+      "gameDayKey",
+      "xpTotal",
+      "totalContributed",
+      "xpDelta",
+      "goldDelta",
+      "createdAt",
+      "updatedAt",
+    ],
+    "historyId",
+  ),
+
   Skills: createDatabaseTableSchema_(
     "Skills",
-    ["skillId", "apiSkillId", "name", "totalLevels", "createdAt", "updatedAt"],
+    ["skillId", "apiSkillId", "name", "totalLevels", "stepValue", "createdAt", "updatedAt"],
     "skillId",
   ),
 
@@ -1695,6 +1711,44 @@ function migrateDatabaseGuildStateAddApiFields_() {
   commitDatabaseWrites_();
 }
 
+/* Migrações idempotentes do catálogo e do objetivo multi-nível. */
+function migrateDatabaseSkillsAndObjectiveFields_() {
+  const spreadsheet = getDatabaseSpreadsheet_();
+  let changed = false;
+
+  const skills = spreadsheet.getSheetByName('Skills');
+  if (skills && skills.getLastColumn() > 0) {
+    const headers = skills.getRange(1, 1, 1, skills.getLastColumn()).getValues()[0];
+    if (headers.indexOf('stepValue') === -1) {
+      const totalLevels = headers.indexOf('totalLevels');
+      if (totalLevels === -1) throw new Error('Coluna "totalLevels" não encontrada em Skills.');
+      const rowCount = Math.max(skills.getLastRow() - 1, 0);
+      skills.insertColumnAfter(totalLevels + 1);
+      skills.getRange(1, totalLevels + 2).setValue('stepValue');
+      if (rowCount > 0) skills.getRange(2, totalLevels + 2, rowCount, 1).setValue(0);
+      markDatabaseTableDirty_('Skills');
+      changed = true;
+    }
+  }
+
+  const guild = spreadsheet.getSheetByName('GuildState');
+  if (guild && guild.getLastColumn() > 0) {
+    const headers = guild.getRange(1, 1, 1, guild.getLastColumn()).getValues()[0];
+    if (headers.indexOf('currentObjectiveTargetLevel') === -1) {
+      const skillId = headers.indexOf('currentObjectiveSkillId');
+      if (skillId === -1) throw new Error('Coluna "currentObjectiveSkillId" não encontrada em GuildState.');
+      const rowCount = Math.max(guild.getLastRow() - 1, 0);
+      guild.insertColumnAfter(skillId + 1);
+      guild.getRange(1, skillId + 2).setValue('currentObjectiveTargetLevel');
+      if (rowCount > 0) guild.getRange(2, skillId + 2, rowCount, 1).setValue('');
+      markDatabaseTableDirty_('GuildState');
+      changed = true;
+    }
+  }
+
+  if (changed) commitDatabaseWrites_();
+}
+
 /* Confere uma cópia integral já fornecida e retira apenas as três colunas
  * rejeitadas. Executar manualmente antes de usar o schema novo. */
 function migratePhase16Block9Schema_() {
@@ -1811,6 +1865,7 @@ function setupDatabase_() {
   try {
     const spreadsheet = getDatabaseSpreadsheet_();
 
+    migrateDatabaseSkillsAndObjectiveFields_();
     validateDatabaseSetupPreconditions_(spreadsheet);
 
     // Setup pode criar abas/headers: toda tabela é autoritativa e invalidada.

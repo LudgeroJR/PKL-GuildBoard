@@ -64,6 +64,11 @@ const API_ACTIONS_ = Object.freeze({
     handler: handleGuildGetPublicState_,
   }),
 
+  "guild.getPublicHistory": Object.freeze({
+    access: API_ACCESS_.PUBLIC,
+    handler: handleGuildGetPublicHistory_,
+  }),
+
   "guild.getPublicObjective": Object.freeze({
     access: API_ACCESS_.PUBLIC,
     handler: handleGuildGetPublicObjective_,
@@ -477,6 +482,10 @@ function handleContributionsGetPublicRanking_(payload) {
 function handleGuildGetPublicState_(payload) {
   validateAllowedProperties_(payload, "payload", []);
   return getPublicGuildState_();
+}
+
+function handleGuildGetPublicHistory_(payload) {
+  return getPublicGuildHistory_(payload);
 }
 
 function handleGuildGetPublicObjective_(payload) {

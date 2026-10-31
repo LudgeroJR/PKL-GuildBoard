@@ -306,6 +306,7 @@ function createCatalogSkill_(payload) {
       apiSkillId: "",
       name: input.name,
       totalLevels: input.totalLevels,
+      stepValue: input.stepValue,
       createdAt: now,
       updatedAt: now,
     };
@@ -391,6 +392,7 @@ function updateCatalogSkill_(payload) {
       apiSkillId: currentSkill.apiSkillId,
       name: input.name,
       totalLevels: input.totalLevels,
+      stepValue: input.stepValue,
       createdAt: currentSkill.createdAt,
       updatedAt: now,
     };
@@ -480,8 +482,8 @@ function updateCatalogSkill_(payload) {
 
 function validateCatalogSkillPayload_(payload, isUpdate) {
   const allowedProperties = isUpdate
-    ? ["skillId", "name", "totalLevels", "buffs", "requirements"]
-    : ["name", "totalLevels", "buffs", "requirements"];
+    ? ["skillId", "name", "totalLevels", "stepValue", "buffs", "requirements"]
+    : ["name", "totalLevels", "stepValue", "buffs", "requirements"];
 
   validateAllowedProperties_(payload, "payload", allowedProperties);
 
@@ -493,6 +495,7 @@ function validateCatalogSkillPayload_(payload, isUpdate) {
     payload.totalLevels,
     "totalLevels",
   );
+  const stepValue = validateNonNegativeInteger_(payload.stepValue, "stepValue");
 
   if (!Array.isArray(payload.buffs)) {
     throwValidationError_("buffs", "O valor deve ser uma lista.");
@@ -601,6 +604,7 @@ function validateCatalogSkillPayload_(payload, isUpdate) {
     skillId: skillId,
     name: name,
     totalLevels: totalLevels,
+    stepValue: stepValue,
     buffs: buffs,
     requirements: requirements,
   };
@@ -848,6 +852,7 @@ function assertValidStoredSkill_(skill) {
     "apiSkillId",
     "name",
     "totalLevels",
+    "stepValue",
     "createdAt",
     "updatedAt",
   ]);
@@ -860,6 +865,7 @@ function assertValidStoredSkill_(skill) {
   }
 
   validatePositiveInteger_(skill.totalLevels, "totalLevels");
+  validateNonNegativeInteger_(skill.stepValue, "stepValue");
   assertValidDate_(skill.createdAt);
   assertValidDate_(skill.updatedAt);
   return skill;
@@ -1065,6 +1071,7 @@ function buildSkillCatalogDtos_(snapshot) {
       apiSkillId: skill.apiSkillId,
       name: skill.name,
       totalLevels: skill.totalLevels,
+      stepValue: skill.stepValue,
       buffs: (buffsBySkillId[skill.skillId] || [])
         .slice()
         .sort(function (left, right) {
@@ -1111,6 +1118,8 @@ function buildSkillProgressionDtos_(snapshot) {
       skillId: skill.skillId,
       name: skill.name,
       totalLevels: skill.totalLevels,
+      stepValue: skill.stepValue,
+      buffs: skill.buffs,
       status: skill.status,
       currentLevel: skill.currentLevel,
       currentStep: state === null ? null : state.currentStep,

@@ -1221,6 +1221,105 @@
     }
 
     /* ========================================================================
+   SegmentedControl — escolha única entre poucas opções (filtros de período)
+   ======================================================================== */
+
+    function segmentedControl(options = {}) {
+      const items = Array.isArray(options.options) ? options.options : [];
+
+      if (items.length < 2) {
+        throw new Error("SegmentedControl exige ao menos duas opções.");
+      }
+
+      const root = document.createElement("div");
+
+      root.className = "pkl-segmented";
+      root.setAttribute("role", "radiogroup");
+      root.setAttribute(
+        "aria-label",
+        normalizeRequiredText_(options.ariaLabel, "ariaLabel"),
+      );
+
+      const buttons = items.map((item) => {
+        const button = document.createElement("button");
+
+        button.type = "button";
+        button.className = "pkl-segmented__option";
+        button.setAttribute("role", "radio");
+        button.textContent = normalizeRequiredText_(item.label, "label");
+
+        if (item.ariaLabel) {
+          button.setAttribute("aria-label", String(item.ariaLabel));
+        }
+
+        root.appendChild(button);
+
+        return button;
+      });
+
+      let currentIndex = Math.max(
+        0,
+        items.findIndex((item) => item.value === options.value),
+      );
+
+      function paint() {
+        buttons.forEach((button, index) => {
+          const isSelected = index === currentIndex;
+
+          button.setAttribute("aria-checked", isSelected ? "true" : "false");
+          button.tabIndex = isSelected ? 0 : -1;
+          button.classList.toggle("is-selected", isSelected);
+        });
+      }
+
+      function choose(index, shouldFocus) {
+        if (index === currentIndex) {
+          if (shouldFocus) buttons[index].focus();
+          return;
+        }
+
+        currentIndex = index;
+        paint();
+
+        if (shouldFocus) buttons[index].focus();
+
+        if (typeof options.onChange === "function") {
+          options.onChange(items[index].value, items[index]);
+        }
+      }
+
+      buttons.forEach((button, index) => {
+        button.addEventListener("click", () => choose(index, false));
+
+        button.addEventListener("keydown", (event) => {
+          let nextIndex = null;
+
+          if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+            nextIndex = (index + 1) % items.length;
+          } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+            nextIndex = (index - 1 + items.length) % items.length;
+          } else if (event.key === "Home") {
+            nextIndex = 0;
+          } else if (event.key === "End") {
+            nextIndex = items.length - 1;
+          } else {
+            return;
+          }
+
+          event.preventDefault();
+          choose(nextIndex, true);
+        });
+      });
+
+      paint();
+
+      return {
+        element: root,
+        getValue: () => items[currentIndex].value,
+      };
+    }
+
+    /* ========================================================================
    Tooltip
    ======================================================================== */
 
@@ -2165,6 +2264,7 @@
       Skeleton: skeleton,
       EmptyState: emptyState,
       Tabs: tabs,
+      SegmentedControl: segmentedControl,
       Tooltip: tooltip,
       Modal: modal,
       ConfirmDialog: confirmDialog,

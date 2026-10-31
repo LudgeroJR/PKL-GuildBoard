@@ -136,6 +136,7 @@ function validateGuildStateRepositoryRecord_(
   validateNonNegativeInteger_(guildState.vagas, 'vagas');
   validateNonNegativeInteger_(guildState.rankingHoje, 'rankingHoje');
   validateNonNegativeInteger_(guildState.rankingOntem, 'rankingOntem');
+  validateNonNegativeInteger_(guildState.currentObjectiveTargetLevel, 'currentObjectiveTargetLevel', {nullable: true});
   assertValidDate_(guildState.createdAt);
   assertValidDate_(guildState.updatedAt);
 
@@ -149,6 +150,10 @@ function validateGuildStateRepositoryRecord_(
       guildState.currentObjectiveSkillId,
       'currentObjectiveSkillId'
     );
+  }
+
+  if (guildState.currentObjectiveTargetLevel !== null && guildState.currentObjectiveSkillId === null) {
+    throwValidationError_('currentObjectiveTargetLevel', 'O nível-alvo exige um objetivo.');
   }
 
   databaseObjectToRow_(
@@ -178,6 +183,8 @@ function normalizeGuildStateFromStorage_(
     normalized.currentObjectiveSkillId =
       null;
   }
+
+  if (normalized.currentObjectiveTargetLevel === '') normalized.currentObjectiveTargetLevel = null;
 
   return normalized;
 }

@@ -42,6 +42,15 @@ function getCurrentGameWeekKey_() {
   );
 }
 
+function getGameDayKey_(date) {
+  const shiftedDate = getGameCalendarShiftedDate_(date);
+  return formatUtcDateKey_(shiftedDate);
+}
+
+function getCurrentGameDayKey_() {
+  return getGameDayKey_(new Date());
+}
+
 function validateGameWeekKey_(
   weekKey,
   fieldName

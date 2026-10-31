@@ -1,16 +1,22 @@
 <script>
   const GuildView = (() => {
+    const CHART_JS_URL =
+      "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js";
+    let chartLibraryPromise = null;
     const SKILL_STATUS = Object.freeze({
-      IN_PROGRESS: {label: 'Em progresso', variant: 'info'},
-      AWAITING_LEVEL_CONFIG: {label: 'Preparando próximo nível', variant: 'warning'},
-      COMPLETED: {label: 'Concluída', variant: 'success'},
+      IN_PROGRESS: { label: "Em progresso", variant: "info" },
+      AWAITING_LEVEL_CONFIG: {
+        label: "Preparando próximo nível",
+        variant: "warning",
+      },
+      COMPLETED: { label: "Concluída", variant: "success" },
     });
 
     function render() {
-      const section = document.createElement('section');
+      const section = document.createElement("section");
 
-      section.className = 'pkl-view pkl-guild-view';
-      section.setAttribute('aria-labelledby', 'pkl-guild-title');
+      section.className = "pkl-view pkl-guild-view";
+      section.setAttribute("aria-labelledby", "pkl-guild-title");
 
       section.innerHTML = `
         <h1 id="pkl-guild-title" class="pkl-view__title">Guild</h1>
@@ -20,9 +26,9 @@
         </p>
       `;
 
-      const content = document.createElement('div');
-      content.className = 'pkl-guild-view__content';
-      content.setAttribute('aria-live', 'polite');
+      const content = document.createElement("div");
+      content.className = "pkl-guild-view__content";
+      content.setAttribute("aria-live", "polite");
       content.tabIndex = -1;
       section.appendChild(content);
 
@@ -33,31 +39,543 @@
 
     async function load_(content) {
       if (!content.isConnected) return;
-      content.setAttribute('aria-busy', 'true');
-      const overview = document.createElement('div');
-      const objective = document.createElement('div');
-      const skills = document.createElement('div');
-      overview.className = 'pkl-guild-view__overview-host';
-      objective.className = 'pkl-guild-view__objective-host';
-      skills.className = 'pkl-guild-view__skills-host';
-      content.replaceChildren(overview, objective, skills);
+      content.setAttribute("aria-busy", "true");
+      const overview = document.createElement("div");
+      const objective = document.createElement("div");
+      const skills = document.createElement("div");
+      const history = document.createElement("div");
+      overview.className = "pkl-guild-view__overview-host";
+      objective.className = "pkl-guild-view__objective-host";
+      skills.className = "pkl-guild-view__skills-host";
+      history.className = "pkl-guild-view__history-host";
+      content.replaceChildren(overview, history, objective, skills);
       await Promise.all([
-        loadSection_(overview, 'guild.getPublicState', validateState_, buildGuildState_, 'a visão geral da Guild'),
-        loadSection_(objective, 'guild.getPublicObjective', validateObjectiveState_, buildGuildObjective_, 'o objetivo atual'),
-        loadSection_(skills, 'skills.getPublicProgression', validateProgression_, buildSkillProgression_, 'as habilidades da Guild'),
+        loadSection_(
+          overview,
+          "guild.getPublicState",
+          validateState_,
+          buildGuildState_,
+          "a visão geral da Guild",
+        ),
+        loadSection_(
+          objective,
+          "guild.getPublicObjective",
+          validateObjectiveState_,
+          buildGuildObjective_,
+          "o objetivo atual",
+        ),
+        loadHistory_(history),
+        loadSection_(
+          skills,
+          "skills.getPublicProgression",
+          validateProgression_,
+          buildSkillProgression_,
+          "as habilidades da Guild",
+        ),
       ]);
-      content.removeAttribute('aria-busy');
+      const nextLevelCard = objective.querySelector(
+        ".pkl-guild-objective__next-level",
+      );
+      const overviewStats = overview.querySelector(".pkl-guild-view__stats");
+      if (nextLevelCard && overviewStats) overviewStats.appendChild(nextLevelCard);
+      content.removeAttribute("aria-busy");
     }
 
-    async function loadSection_(host, action, validate, build, label, isRetry = false) {
+    const HISTORY_PERIODS = Object.freeze([7, 15, 30, 90]);
+
+    const HISTORY_METRICS = Object.freeze([
+      {
+        key: "xp",
+        field: "xpDelta",
+        label: "XP produzido",
+        unit: "XP",
+        colorVar: "--pkl-color-info",
+      },
+      {
+        key: "gold",
+        field: "goldDelta",
+        label: "Gold arrecadado",
+        unit: "Gold",
+        colorVar: "--pkl-color-warning",
+      },
+    ]);
+
+    function fetchHistory_(days) {
+      return ApiClient.requestPublic("guild.getPublicHistory", { days }).then(
+        (data) => {
+          validateHistory_(data);
+          return data;
+        },
+      );
+    }
+
+    async function loadHistory_(host, days = 7, shouldFocus = false) {
       if (!host.isConnected) return;
-      host.setAttribute('aria-busy', 'true');
+      host.setAttribute("aria-busy", "true");
       host.tabIndex = -1;
-      const status = document.createElement('p');
-      status.className = 'pkl-status';
-      status.setAttribute('role', 'status');
+      host.replaceChildren(UI.Skeleton({ lines: 3 }));
+      try {
+        const data = await fetchHistory_(days);
+        if (!host.isConnected) return;
+        host.replaceChildren(buildHistory_(data));
+        if (shouldFocus) host.focus();
+      } catch (error) {
+        if (!host.isConnected) return;
+        host.replaceChildren(
+          UI.EmptyState({
+            title: "Não foi possível carregar o histórico diário",
+            description:
+              "Os dados estão indisponíveis no momento. Tente novamente em instantes.",
+            action: UI.Button({
+              label: "Tentar novamente",
+              onClick: () => loadHistory_(host, days, true),
+            }),
+          }).element,
+        );
+        if (shouldFocus) host.focus();
+      } finally {
+        host.removeAttribute("aria-busy");
+      }
+    }
+
+    function validateHistory_(data) {
+      if (!data || !Number.isInteger(data.days) || !Array.isArray(data.records))
+        throw new Error("Histórico inválido.");
+      data.records.forEach((record) => {
+        if (
+          !/^\d{4}-\d{2}-\d{2}$/.test(record.gameDayKey) ||
+          !Number.isSafeInteger(record.xpTotal) ||
+          !Number.isSafeInteger(record.totalContributed) ||
+          (record.xpDelta !== null && !Number.isSafeInteger(record.xpDelta)) ||
+          (record.goldDelta !== null && !Number.isSafeInteger(record.goldDelta))
+        )
+          throw new Error("Snapshot inválido.");
+      });
+    }
+
+    // O painel (título + filtro) permanece montado; trocar o período só
+    // substitui o corpo, evitando salto de layout e perda de foco.
+    function buildHistory_(initialData) {
+      const cache = new Map([[initialData.days, initialData]]);
+      let charts = [];
+      let requestSequence = 0;
+
+      const section = document.createElement("section");
+      section.className = "pkl-guild-history";
+
+      const header = document.createElement("div");
+      header.className = "pkl-guild-history__header";
+      const heading = document.createElement("div");
+      heading.className = "pkl-guild-history__heading";
+      heading.innerHTML =
+        '<h2 class="pkl-guild-view__section-title">Histórico diário</h2>' +
+        '<p class="pkl-guild-skills__description">Produção diária válida de XP e Gold. O dia do jogo começa às 07:00.</p>';
+
+      const filter = UI.SegmentedControl({
+        ariaLabel: "Período do histórico",
+        value: initialData.days,
+        options: HISTORY_PERIODS.map((days) => ({
+          value: days,
+          label: `${days} dias`,
+          ariaLabel: `Últimos ${days} dias`,
+        })),
+        onChange: (days) => show(days),
+      });
+      header.append(heading, filter.element);
+
+      const body = document.createElement("div");
+      body.className = "pkl-guild-history__body";
+      body.setAttribute("aria-live", "polite");
+
+      section.append(header, body);
+
+      function destroyCharts() {
+        charts.forEach((chart) => chart.destroy());
+        charts = [];
+      }
+
+      async function show(days) {
+        const sequence = ++requestSequence;
+        body.classList.add("is-loading");
+        body.setAttribute("aria-busy", "true");
+        try {
+          let data = cache.get(days);
+          if (!data) {
+            data = await fetchHistory_(days);
+            cache.set(days, data);
+          }
+          if (sequence !== requestSequence || !section.isConnected) return;
+          destroyCharts();
+          body.replaceChildren(await buildHistoryBody_(data, charts));
+        } catch (error) {
+          if (sequence !== requestSequence) return;
+          destroyCharts();
+          body.replaceChildren(
+            UI.EmptyState({
+              title: "Não foi possível carregar este período",
+              description:
+                "Os dados estão indisponíveis no momento. Tente novamente em instantes.",
+              action: UI.Button({
+                label: "Tentar novamente",
+                onClick: () => show(days),
+              }),
+            }).element,
+          );
+        } finally {
+          if (sequence === requestSequence) {
+            body.classList.remove("is-loading");
+            body.removeAttribute("aria-busy");
+          }
+        }
+      }
+
+      window.queueMicrotask(() => show(initialData.days));
+      return section;
+    }
+
+    async function buildHistoryBody_(data, charts) {
+      const fragment = document.createDocumentFragment();
+
+      if (data.records.length === 0) {
+        fragment.appendChild(
+          UI.EmptyState({
+            title: "Nenhum histórico disponível",
+            description: "O primeiro sync criará um baseline.",
+          }).element,
+        );
+        return fragment;
+      }
+      if (data.baselineOnly) {
+        fragment.appendChild(
+          UI.EmptyState({
+            title: "Baseline registrado",
+            description:
+              "Ainda não há um segundo snapshot para calcular produção diária.",
+          }).element,
+        );
+        return fragment;
+      }
+
+      const hasIncompleteRecords = data.records.some(
+        (record) => record.xpDelta === null || record.goldDelta === null,
+      );
+      if (hasIncompleteRecords) {
+        const note = document.createElement("p");
+        note.className = "pkl-guild-history__note";
+        note.setAttribute("role", "status");
+        note.textContent =
+          "Alguns dias não têm produção calculável; eles ficam sem barra e não são tratados como ganho zero.";
+        fragment.appendChild(note);
+      }
+
+      const grid = document.createElement("div");
+      grid.className = "pkl-guild-history__charts";
+      for (const metric of HISTORY_METRICS) {
+        grid.appendChild(await buildMetricChart_(metric, data.records, charts));
+      }
+      fragment.append(grid, buildAccessibleHistoryTable_(data.records));
+      return fragment;
+    }
+
+    function summarizeMetric_(records, field) {
+      const values = records
+        .map((record) => record[field])
+        .filter((value) => value !== null);
+      const total = values.reduce((sum, value) => sum + value, 0);
+      return {
+        total,
+        average: values.length ? total / values.length : null,
+        peak: values.length ? Math.max(...values) : null,
+        count: values.length,
+      };
+    }
+
+    function formatCompact_(value) {
+      return new Intl.NumberFormat("pt-BR", {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }).format(value);
+    }
+
+    function cssColor_(name) {
+      return getComputedStyle(document.documentElement)
+        .getPropertyValue(name)
+        .trim();
+    }
+
+    function withAlpha_(hex, alpha) {
+      const match = /^#([0-9a-f]{6})$/i.exec(hex);
+      if (!match) return hex;
+      const value = parseInt(match[1], 16);
+      return `rgba(${value >> 16}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
+    }
+
+    async function buildMetricChart_(metric, records, charts) {
+      const color = cssColor_(metric.colorVar) || "#66a9db";
+      const summary = summarizeMetric_(records, metric.field);
+      const integer = new Intl.NumberFormat("pt-BR", {
+        maximumFractionDigits: 0,
+      });
+
+      const card = document.createElement("article");
+      card.className = "pkl-history-chart";
+      card.style.setProperty("--pkl-history-color", color);
+
+      const head = document.createElement("header");
+      head.className = "pkl-history-chart__head";
+      const title = document.createElement("div");
+      title.className = "pkl-history-chart__title";
+      const label = document.createElement("span");
+      label.className = "pkl-history-chart__label";
+      label.textContent = metric.label;
+      const total = document.createElement("strong");
+      total.className = "pkl-history-chart__total";
+      total.textContent = integer.format(summary.total);
+      title.append(label, total);
+
+      const stats = document.createElement("dl");
+      stats.className = "pkl-history-chart__stats";
+      [
+        [
+          "Média por dia",
+          summary.average === null ? "—" : formatCompact_(summary.average),
+        ],
+        ["Melhor dia", summary.peak === null ? "—" : formatCompact_(summary.peak)],
+      ].forEach(([term, value]) => {
+        const group = document.createElement("div");
+        const dt = document.createElement("dt");
+        const dd = document.createElement("dd");
+        dt.textContent = term;
+        dd.textContent = value;
+        group.append(dt, dd);
+        stats.appendChild(group);
+      });
+      head.append(title, stats);
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "pkl-history-chart__canvas";
+      const canvas = document.createElement("canvas");
+      canvas.setAttribute("role", "img");
+      canvas.setAttribute(
+        "aria-label",
+        `Gráfico de barras: ${metric.label.toLowerCase()} por dia, total de ${integer.format(summary.total)} ${metric.unit} no período.`,
+      );
+      wrapper.appendChild(canvas);
+      card.append(head, wrapper);
+
+      try {
+        await loadChartLibrary_();
+        charts.push(buildBarChart_(canvas, metric, records, summary, color));
+      } catch (error) {
+        const fallback = document.createElement("p");
+        fallback.className = "pkl-guild-history__note";
+        fallback.setAttribute("role", "status");
+        fallback.textContent =
+          "O gráfico não pôde ser carregado. Os dados continuam disponíveis no resumo acessível.";
+        wrapper.replaceChildren(fallback);
+      }
+      return card;
+    }
+
+    function buildBarChart_(canvas, metric, records, summary, color) {
+      const textMuted = cssColor_("--pkl-color-text-subtle") || "#7f8a98";
+      const textSoft = cssColor_("--pkl-color-text-muted") || "#a9b2bf";
+      const grid = "rgba(169, 178, 191, 0.10)";
+      const reduceMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      const pointsCount = records.length;
+
+      window.Chart.defaults.font.family = getComputedStyle(
+        document.body,
+      ).fontFamily;
+      window.Chart.defaults.font.size = 12;
+
+      const hoverBand = {
+        id: "pklHoverBand",
+        beforeDatasetsDraw(chart) {
+          const active = chart.tooltip && chart.tooltip.getActiveElements();
+          if (!active || active.length === 0) return;
+          const { ctx, chartArea } = chart;
+          const meta = chart.getDatasetMeta(0);
+          const index = active[0].index;
+          const current = meta.data[index];
+          if (!current) return;
+          const prev = meta.data[index - 1];
+          const next = meta.data[index + 1];
+          const step = next
+            ? next.x - current.x
+            : prev
+              ? current.x - prev.x
+              : chartArea.width;
+          ctx.save();
+          ctx.fillStyle = "rgba(255, 255, 255, 0.04)";
+          ctx.fillRect(
+            current.x - step / 2,
+            chartArea.top,
+            step,
+            chartArea.bottom - chartArea.top,
+          );
+          ctx.restore();
+        },
+      };
+
+      return new window.Chart(canvas, {
+        type: "bar",
+        plugins: [hoverBand],
+        data: {
+          labels: records.map((record) => formatHistoryDate_(record.gameDayKey)),
+          datasets: [
+            {
+              label: metric.unit,
+              data: records.map((record) => record[metric.field]),
+              backgroundColor: withAlpha_(color, 0.72),
+              hoverBackgroundColor: color,
+              borderRadius: { topLeft: 4, topRight: 4 },
+              borderSkipped: "bottom",
+              maxBarThickness: 28,
+              categoryPercentage: 0.82,
+              barPercentage: 0.86,
+              order: 2,
+            },
+            {
+              type: "line",
+              label: "Média",
+              data: records.map(() => summary.average),
+              borderColor: withAlpha_(textSoft, 0.7),
+              borderDash: [5, 5],
+              borderWidth: 1.5,
+              pointRadius: 0,
+              pointHoverRadius: 0,
+              order: 1,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: reduceMotion
+            ? false
+            : { duration: 420, easing: "easeOutQuart" },
+          interaction: { mode: "index", intersect: false },
+          layout: { padding: { top: 8, right: 4 } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: cssColor_("--pkl-color-surface-raised") || "#181e27",
+              borderColor: cssColor_("--pkl-color-border-strong") || "#3a4655",
+              borderWidth: 1,
+              titleColor: textSoft,
+              bodyColor: cssColor_("--pkl-color-text") || "#f3f6fa",
+              titleFont: { weight: "500", size: 12 },
+              bodyFont: { weight: "600", size: 13 },
+              padding: 12,
+              cornerRadius: 10,
+              boxPadding: 4,
+              usePointStyle: true,
+              filter: (item) => item.datasetIndex === 0,
+              callbacks: {
+                title: (items) => {
+                  const record = records[items[0].dataIndex];
+                  const [year, month, day] = record.gameDayKey.split("-");
+                  return `${day}/${month}/${year}`;
+                },
+                label: (context) =>
+                  context.parsed.y === null
+                    ? `${metric.unit}: indisponível`
+                    : `${metric.unit}: +${context.parsed.y.toLocaleString("pt-BR")}`,
+                labelColor: () => ({
+                  borderColor: color,
+                  backgroundColor: color,
+                  borderRadius: 3,
+                }),
+                afterBody: () =>
+                  summary.average === null
+                    ? ""
+                    : `Média: ${Math.round(summary.average).toLocaleString("pt-BR")}`,
+              },
+            },
+          },
+          scales: {
+            x: {
+              grid: { display: false },
+              border: { color: "rgba(169, 178, 191, 0.18)" },
+              ticks: {
+                color: textMuted,
+                padding: 8,
+                maxRotation: 0,
+                autoSkip: true,
+                maxTicksLimit: pointsCount <= 15 ? 15 : 8,
+              },
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: grid },
+              border: { display: false },
+              ticks: {
+                color: textMuted,
+                padding: 10,
+                maxTicksLimit: 5,
+                callback: (value) => formatCompact_(value),
+              },
+            },
+          },
+        },
+      });
+    }
+
+    function loadChartLibrary_() {
+      if (window.Chart) return Promise.resolve();
+      if (chartLibraryPromise) return chartLibraryPromise;
+      chartLibraryPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = CHART_JS_URL;
+        script.onload = () =>
+          window.Chart
+            ? resolve()
+            : reject(new Error("Chart.js não disponível."));
+        script.onerror = () => reject(new Error("Falha ao carregar Chart.js."));
+        document.head.appendChild(script);
+      });
+      return chartLibraryPromise;
+    }
+
+    function formatHistoryDate_(gameDayKey) {
+      const parts = gameDayKey.split("-");
+      return `${parts[2]}/${parts[1]}`;
+    }
+
+    function buildAccessibleHistoryTable_(records) {
+      const table = document.createElement("table");
+      table.className = "pkl-guild-history__accessible-table pkl-sr-only";
+      table.innerHTML =
+        "<caption>Dados do histórico diário</caption><thead><tr><th>Dia</th><th>XP</th><th>Gold</th></tr></thead>";
+      const body = document.createElement("tbody");
+      records.forEach((record) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `<td>${record.gameDayKey}</td><td>${record.xpDelta === null ? "Indisponível" : `+${record.xpDelta}`}</td><td>${record.goldDelta === null ? "Indisponível" : `+${record.goldDelta}`}</td>`;
+        body.appendChild(row);
+      });
+      table.appendChild(body);
+      return table;
+    }
+
+    async function loadSection_(
+      host,
+      action,
+      validate,
+      build,
+      label,
+      isRetry = false,
+    ) {
+      if (!host.isConnected) return;
+      host.setAttribute("aria-busy", "true");
+      host.tabIndex = -1;
+      const status = document.createElement("p");
+      status.className = "pkl-status";
+      status.setAttribute("role", "status");
       status.textContent = `Carregando ${label}...`;
-      host.replaceChildren(status, UI.Skeleton({lines: 3}));
+      host.replaceChildren(status, UI.Skeleton({ lines: 3 }));
 
       try {
         const data = await ApiClient.requestPublic(action, {});
@@ -67,48 +585,63 @@
         if (isRetry) host.focus();
       } catch (error) {
         if (!host.isConnected) return;
-        const retry = UI.Button({label: 'Tentar novamente',
-          onClick: () => loadSection_(host, action, validate, build, label, true)});
-        host.replaceChildren(UI.EmptyState({
-          title: `Não foi possível carregar ${label}`,
-          description: 'Os dados estão indisponíveis no momento. Tente novamente em instantes.',
-          action: retry,
-        }).element);
+        const retry = UI.Button({
+          label: "Tentar novamente",
+          onClick: () =>
+            loadSection_(host, action, validate, build, label, true),
+        });
+        host.replaceChildren(
+          UI.EmptyState({
+            title: `Não foi possível carregar ${label}`,
+            description:
+              "Os dados estão indisponíveis no momento. Tente novamente em instantes.",
+            action: retry,
+          }).element,
+        );
         if (isRetry) retry.focus();
       } finally {
-        host.removeAttribute('aria-busy');
+        host.removeAttribute("aria-busy");
       }
     }
 
     function buildGuildState_(state) {
-      const section = document.createElement('section');
-      const title = document.createElement('h2');
-      section.className = 'pkl-guild-view__overview';
-      title.className = 'pkl-guild-view__section-title';
-      title.textContent = 'Visão geral';
+      const section = document.createElement("section");
+      const title = document.createElement("h2");
+      section.className = "pkl-guild-view__overview";
+      title.className = "pkl-guild-view__section-title";
+      title.textContent = "Visão geral";
       section.appendChild(title);
 
       let body;
       if (!state.initialized) {
         body = UI.EmptyState({
-          title: 'A Guild ainda não foi configurada',
-          description: 'O nível e o Guild Bank aparecerão aqui após a configuração pela administração.',
-          icon: 'shield',
+          title: "A Guild ainda não foi configurada",
+          description:
+            "O nível e o Guild Bank aparecerão aqui após a configuração pela administração.",
+          icon: "shield",
         }).element;
       } else {
-        body = document.createElement('div');
-        body.className = 'pkl-guild-view__stats';
-        const integerFormat = new Intl.NumberFormat('pt-BR', {maximumFractionDigits: 0});
+        body = document.createElement("div");
+        body.className = "pkl-guild-view__stats";
+        const integerFormat = new Intl.NumberFormat("pt-BR", {
+          maximumFractionDigits: 0,
+        });
         body.append(
-          UI.StatCard({label: 'Nível da Guild',
+          UI.StatCard({
+            label: "Nível da Guild",
             value: integerFormat.format(state.level),
-            supportingText: 'Nível atual da Guild.'}).element,
-          UI.StatCard({label: 'Guild Bank',
+            supportingText: "Nível atual da Guild.",
+          }).element,
+          UI.StatCard({
+            label: "Guild Bank",
             value: UtilitiesClient.formatGameMoney(state.bankBalance),
-            supportingText: 'Saldo atual sincronizado com o jogo.'}).element,
-          UI.StatCard({label: 'Ranking',
+            supportingText: "Saldo atual sincronizado com o jogo.",
+          }).element,
+          UI.StatCard({
+            label: "Ranking",
             value: `Hoje: ${integerFormat.format(state.rankingHoje)}`,
-            supportingText: 'Posição da Guild no ranking.'}).element
+            supportingText: "Posição da Guild no ranking.",
+          }).element,
         );
       }
       section.appendChild(body);
@@ -116,182 +649,283 @@
     }
 
     function buildGuildObjective_(data) {
-      const section = document.createElement('section');
-      const heading = document.createElement('div');
-      const title = document.createElement('h2');
-      const description = document.createElement('p');
-      section.className = 'pkl-guild-objective';
-      heading.className = 'pkl-guild-objective__heading';
-      title.className = 'pkl-guild-view__section-title';
-      title.textContent = 'Objetivo atual';
-      description.className = 'pkl-guild-objective__description';
-      description.textContent = 'Acompanhe o próximo avanço priorizado pela Guild.';
+      const section = document.createElement("section");
+      const heading = document.createElement("div");
+      const title = document.createElement("h2");
+      const description = document.createElement("p");
+      section.className = "pkl-guild-objective";
+      heading.className = "pkl-guild-objective__heading";
+      title.className = "pkl-guild-view__section-title";
+      title.textContent = "Objetivo atual";
+      description.className = "pkl-guild-objective__description";
+      description.textContent =
+        "Acompanhe o próximo avanço priorizado pela Guild.";
       heading.append(title, description);
       section.appendChild(heading);
 
       if (!data.initialized) {
-        section.appendChild(UI.EmptyState({
-          title: 'Objetivo ainda indisponível',
-          description: 'A Guild precisa ser configurada antes de definir um objetivo.',
-          icon: 'shield',
-        }).element);
+        section.appendChild(
+          UI.EmptyState({
+            title: "Objetivo ainda indisponível",
+            description:
+              "A Guild precisa ser configurada antes de definir um objetivo.",
+            icon: "shield",
+          }).element,
+        );
         return section;
       }
 
       if (data.objective === null) {
-        section.appendChild(UI.EmptyState({
-          title: 'Nenhum objetivo definido',
-          description: 'A administração ainda não selecionou uma habilidade como objetivo atual.',
-          icon: 'shield',
-        }).element);
+        section.appendChild(
+          UI.EmptyState({
+            title: "Nenhum objetivo definido",
+            description:
+              "A administração ainda não selecionou uma habilidade como objetivo atual.",
+            icon: "shield",
+          }).element,
+        );
         return section;
       }
 
       const objective = data.objective;
-      if (objective.status !== 'IN_PROGRESS') {
+      if (objective.status !== "IN_PROGRESS") {
         const messages = {
-          COMPLETED: ['Habilidade concluída', 'A habilidade selecionada já atingiu o nível máximo. A seleção foi preservada; a administração pode escolher outro objetivo.'],
-          AWAITING_LEVEL_CONFIG: ['Próximo nível em preparação', 'A habilidade selecionada aguarda a configuração do próximo nível. A seleção foi preservada.'],
-          LOCKED: ['Habilidade bloqueada', 'Os pré-requisitos atuais não permitem avançar nesta habilidade. A seleção foi preservada.'],
-          AVAILABLE: ['Habilidade sem progresso', 'A habilidade selecionada ainda não possui progresso iniciado. A seleção foi preservada.'],
-          INVALID_REFERENCE: ['Referência de objetivo inválida', 'A habilidade selecionada não existe mais no catálogo. A seleção foi preservada para revisão administrativa.'],
+          COMPLETED: [
+            "Habilidade concluída",
+            "A habilidade selecionada já atingiu o nível máximo. A seleção foi preservada; a administração pode escolher outro objetivo.",
+          ],
+          AWAITING_LEVEL_CONFIG: [
+            "Próximo nível em preparação",
+            "A habilidade selecionada aguarda a configuração do próximo nível. A seleção foi preservada.",
+          ],
+          LOCKED: [
+            "Habilidade bloqueada",
+            "Os pré-requisitos atuais não permitem avançar nesta habilidade. A seleção foi preservada.",
+          ],
+          AVAILABLE: [
+            "Habilidade sem progresso",
+            "A habilidade selecionada ainda não possui progresso iniciado. A seleção foi preservada.",
+          ],
+          INVALID_REFERENCE: [
+            "Referência de objetivo inválida",
+            "A habilidade selecionada não existe mais no catálogo. A seleção foi preservada para revisão administrativa.",
+          ],
         };
         const [titleText, descriptionText] = messages[objective.status];
-        section.appendChild(UI.EmptyState({
-          title: titleText,
-          description: descriptionText,
-          icon: 'shield',
-        }).element);
+        section.appendChild(
+          UI.EmptyState({
+            title: titleText,
+            description: descriptionText,
+            icon: "shield",
+          }).element,
+        );
         return section;
       }
 
-      const body = document.createElement('div');
-      body.className = 'pkl-guild-objective__body';
-      const summary = document.createElement('div');
-      summary.className = 'pkl-guild-objective__summary';
-      const nameGroup = document.createElement('div');
-      const name = document.createElement('h3');
-      name.className = 'pkl-guild-objective__name';
+      const body = document.createElement("div");
+      body.className = "pkl-guild-objective__body";
+      const summary = document.createElement("div");
+      summary.className = "pkl-guild-objective__summary";
+      const nameGroup = document.createElement("div");
+      const name = document.createElement("h3");
+      name.className = "pkl-guild-objective__name";
       name.textContent = objective.name;
-      const level = document.createElement('p');
-      level.className = 'pkl-guild-objective__level';
+      const level = document.createElement("p");
+      level.className = "pkl-guild-objective__level";
       level.textContent = `Nível ${objective.currentLevel} → ${objective.targetLevel}`;
       nameGroup.append(name, level);
-      summary.append(nameGroup, UI.Badge({label: 'Em progresso', variant: 'info'}));
+      summary.append(
+        nameGroup,
+        UI.Badge({ label: "Em progresso", variant: "info" }),
+      );
 
-      const buff = document.createElement('p');
-      buff.className = 'pkl-guild-objective__buff';
+      const buff = document.createElement("p");
+      buff.className = "pkl-guild-objective__buff";
       buff.textContent = `Próximo buff — nível ${objective.nextBuff.level}: ${objective.nextBuff.description}`;
       const progress = UI.Progress({
-        label: 'Progresso do objetivo',
+        label: "Progresso do objetivo",
         value: objective.progressPercent,
         max: 100,
         valueText: `${formatObjectiveDecimal_(objective.progressPercent, 1)}% — ${objective.currentStep} de ${objective.totalSteps} steps`,
       });
-      const metrics = document.createElement('div');
-      metrics.className = 'pkl-guild-objective__metrics';
+      const metrics = document.createElement("div");
+      metrics.className = "pkl-guild-objective__metrics";
       [
-        ['Steps restantes', String(objective.remainingSteps)],
+        ["Steps restantes", String(objective.remainingSteps)],
+        [
+          "Custo restante",
+          objective.costConfigured
+            ? UtilitiesClient.formatGameMoney(objective.projections.cost)
+            : "Indisponível",
+        ],
       ].forEach(([label, value]) => {
-        metrics.appendChild(UI.StatCard({label, value}).element);
+        metrics.appendChild(UI.StatCard({ label, value }).element);
       });
 
-      body.append(summary, buff, progress.element, metrics);
+      body.append(
+        summary,
+        buff,
+        progress.element,
+        metrics,
+        buildProjectionSummary_(objective.projections),
+      );
       section.appendChild(body);
       return section;
     }
 
+    function buildProjectionSummary_(projections) {
+      const section = document.createElement("div");
+      section.className = "pkl-guild-objective__projections";
+      const title = document.createElement("h3");
+      title.textContent = "Projeções";
+      section.appendChild(title);
+      [
+        [
+          "Projeção ideal",
+          projections.ideal,
+          "Dias estimados para concluir o objetivo com a meta semanal atual.",
+        ],
+        [
+          "Projeção histórica",
+          projections.historical,
+          "Dias estimados usando a média histórica de arrecadação.",
+        ],
+      ].forEach(([label, projection, explanation]) => {
+        const value =
+          projection.status === "AVAILABLE"
+            ? `${projection.days} dias`
+            : "Indisponível";
+        section.appendChild(
+          UI.StatCard({ label, value, supportingText: explanation }).element,
+        );
+      });
+      const nextLevel = projections.nextGuildLevel;
+      const nextLevelCard = UI.StatCard({
+        label: "Próximo nível da Guild",
+        value:
+          nextLevel.status === "AVAILABLE"
+            ? `${nextLevel.days} dias`
+            : "Indisponível",
+        supportingText:
+          nextLevel.status === "AVAILABLE"
+            ? `XP restante ÷ média diária válida de ${formatObjectiveDecimal_(nextLevel.ratePerDay, 0)} XP.`
+            : "É necessário ter XP restante e uma média diária válida.",
+      }).element;
+      nextLevelCard.classList.add(
+        "pkl-guild-objective__next-level",
+        "pkl-guild-view__next-level",
+      );
+      section.appendChild(nextLevelCard);
+      return section;
+    }
+
     function formatObjectiveDecimal_(value, maximumFractionDigits) {
-      return new Intl.NumberFormat('pt-BR', {
+      return new Intl.NumberFormat("pt-BR", {
         maximumFractionDigits,
       }).format(value);
     }
 
     function buildSkillProgression_(progression) {
-      const section = document.createElement('section');
-      const heading = document.createElement('div');
-      const title = document.createElement('h2');
-      const description = document.createElement('p');
-      section.className = 'pkl-guild-skills';
-      heading.className = 'pkl-guild-skills__header';
-      title.className = 'pkl-guild-view__section-title';
-      title.textContent = 'Habilidades da Guild';
-      description.className = 'pkl-guild-skills__description';
-      description.textContent = 'Acompanhe habilidades em desenvolvimento e conquistas da Guild.';
+      const section = document.createElement("section");
+      const heading = document.createElement("div");
+      const title = document.createElement("h2");
+      const description = document.createElement("p");
+      section.className = "pkl-guild-skills";
+      heading.className = "pkl-guild-skills__header";
+      title.className = "pkl-guild-view__section-title";
+      title.textContent = "Habilidades da Guild";
+      description.className = "pkl-guild-skills__description";
+      description.textContent =
+        "Acompanhe habilidades em desenvolvimento e conquistas da Guild.";
       heading.append(title, description);
       section.appendChild(heading);
 
       if (progression.length === 0) {
-        section.appendChild(UI.EmptyState({
-          title: 'Nenhuma habilidade em progressão',
-          description: 'As habilidades aparecerão após serem ativadas pela administração.',
-          icon: 'book-open',
-        }).element);
+        section.appendChild(
+          UI.EmptyState({
+            title: "Nenhuma habilidade em progressão",
+            description:
+              "As habilidades aparecerão após serem ativadas pela administração.",
+            icon: "book-open",
+          }).element,
+        );
         return section;
       }
 
-      const grid = document.createElement('div');
-      grid.className = 'pkl-guild-skills__grid';
+      const grid = document.createElement("div");
+      grid.className = "pkl-guild-skills__grid";
       progression.forEach((skill) => grid.appendChild(buildSkillCard_(skill)));
       section.appendChild(grid);
       return section;
     }
 
     function buildSkillCard_(skill) {
-      const body = document.createElement('div');
-      const summary = document.createElement('div');
-      const level = document.createElement('p');
-      body.className = 'pkl-guild-skill-card__body';
-      summary.className = 'pkl-guild-skill-card__summary';
-      level.className = 'pkl-guild-skill-card__level';
+      const body = document.createElement("div");
+      const summary = document.createElement("div");
+      const level = document.createElement("p");
+      body.className = "pkl-guild-skill-card__body";
+      summary.className = "pkl-guild-skill-card__summary";
+      level.className = "pkl-guild-skill-card__level";
       level.textContent = `Nível ${skill.currentLevel} de ${skill.totalLevels}`;
       summary.append(level, UI.Badge(SKILL_STATUS[skill.status]));
       body.appendChild(summary);
 
-      if (skill.status === 'IN_PROGRESS') {
-        body.appendChild(UI.Progress({
-          label: `Steps: ${skill.currentStep} de ${skill.totalSteps}`,
-          value: skill.currentStep,
-          max: skill.totalSteps,
-        }).element);
-        body.appendChild(info_('Próximo buff',
-          `Nível ${skill.nextBuff.level} — ${skill.nextBuff.description}`));
-      } else if (skill.status === 'AWAITING_LEVEL_CONFIG') {
-        body.appendChild(info_(
-          'Próximo passo',
-          `O nível ${skill.currentLevel} foi conquistado. A configuração do próximo nível está em preparação.`,
-        ));
-        body.appendChild(info_('Próximo buff',
-          `Nível ${skill.nextBuff.level} — ${skill.nextBuff.description}`));
+      if (skill.status === "IN_PROGRESS") {
+        body.appendChild(
+          UI.Progress({
+            label: `Steps: ${skill.currentStep} de ${skill.totalSteps}`,
+            value: skill.currentStep,
+            max: skill.totalSteps,
+          }).element,
+        );
+        body.appendChild(
+          info_(
+            "Próximo buff",
+            `Nível ${skill.nextBuff.level} — ${skill.nextBuff.description}`,
+          ),
+        );
+      } else if (skill.status === "AWAITING_LEVEL_CONFIG") {
+        body.appendChild(
+          info_(
+            "Próximo passo",
+            `O nível ${skill.currentLevel} foi conquistado. A configuração do próximo nível está em preparação.`,
+          ),
+        );
+        body.appendChild(
+          info_(
+            "Próximo buff",
+            `Nível ${skill.nextBuff.level} — ${skill.nextBuff.description}`,
+          ),
+        );
       } else {
-        const buffs = document.createElement('ul');
-        buffs.className = 'pkl-guild-skill-card__buffs';
+        const buffs = document.createElement("ul");
+        buffs.className = "pkl-guild-skill-card__buffs";
         skill.earnedBuffs.forEach((buff) => {
-          const item = document.createElement('li');
+          const item = document.createElement("li");
           item.textContent = `Nível ${buff.level} — ${buff.description}`;
           buffs.appendChild(item);
         });
-        body.appendChild(info_('Buffs conquistados', buffs));
+        body.appendChild(info_("Buffs conquistados", buffs));
       }
 
       return UI.Card({
         title: skill.name,
         body,
-        className: 'pkl-guild-skill-card',
+        className: "pkl-guild-skill-card",
       }).element;
     }
 
     function info_(labelText, content) {
-      const group = document.createElement('div');
-      const label = document.createElement('span');
-      group.className = 'pkl-guild-skill-card__info';
-      label.className = 'pkl-guild-skill-card__label';
+      const group = document.createElement("div");
+      const label = document.createElement("span");
+      group.className = "pkl-guild-skill-card__info";
+      label.className = "pkl-guild-skill-card__label";
       label.textContent = labelText;
       group.appendChild(label);
       if (content instanceof Node) {
         group.appendChild(content);
       } else {
-        const value = document.createElement('p');
+        const value = document.createElement("p");
         value.textContent = content;
         group.appendChild(value);
       }
@@ -300,125 +934,210 @@
 
     function validateProgression_(progression) {
       if (!Array.isArray(progression)) {
-        throw new Error('Progressão pública inválida.');
+        throw new Error("Progressão pública inválida.");
       }
       const ids = Object.create(null);
       progression.forEach((skill) => {
-        if (!skill || typeof skill.skillId !== 'string' || ids[skill.skillId] ||
-            typeof skill.name !== 'string' || !skill.name.trim() ||
-            !SKILL_STATUS[skill.status] ||
-            !Number.isSafeInteger(skill.totalLevels) || skill.totalLevels < 1 ||
-            !Number.isSafeInteger(skill.currentLevel) || skill.currentLevel < 0 ||
-            !Array.isArray(skill.earnedBuffs)) {
-          throw new Error('Habilidade pública inválida.');
+        if (
+          !skill ||
+          typeof skill.skillId !== "string" ||
+          ids[skill.skillId] ||
+          typeof skill.name !== "string" ||
+          !skill.name.trim() ||
+          !SKILL_STATUS[skill.status] ||
+          !Number.isSafeInteger(skill.totalLevels) ||
+          skill.totalLevels < 1 ||
+          !Number.isSafeInteger(skill.currentLevel) ||
+          skill.currentLevel < 0 ||
+          !Array.isArray(skill.earnedBuffs)
+        ) {
+          throw new Error("Habilidade pública inválida.");
         }
         ids[skill.skillId] = true;
-        if (skill.currentLevel > skill.totalLevels ||
-            skill.earnedBuffs.length !== skill.currentLevel ||
-            skill.earnedBuffs.some((buff, index) =>
-              !buff || buff.level !== index + 1 ||
-              typeof buff.description !== 'string' || !buff.description.trim())) {
-          throw new Error('Buffs públicos inválidos.');
+        if (
+          skill.currentLevel > skill.totalLevels ||
+          skill.earnedBuffs.length !== skill.currentLevel ||
+          skill.earnedBuffs.some(
+            (buff, index) =>
+              !buff ||
+              buff.level !== index + 1 ||
+              typeof buff.description !== "string" ||
+              !buff.description.trim(),
+          )
+        ) {
+          throw new Error("Buffs públicos inválidos.");
         }
-        if (skill.nextBuff !== null &&
-            (!skill.nextBuff || skill.nextBuff.level !== skill.currentLevel + 1 ||
-              typeof skill.nextBuff.description !== 'string' ||
-              !skill.nextBuff.description.trim())) {
-          throw new Error('Próximo buff público inválido.');
+        if (
+          skill.nextBuff !== null &&
+          (!skill.nextBuff ||
+            skill.nextBuff.level !== skill.currentLevel + 1 ||
+            typeof skill.nextBuff.description !== "string" ||
+            !skill.nextBuff.description.trim())
+        ) {
+          throw new Error("Próximo buff público inválido.");
         }
-        if (skill.status === 'IN_PROGRESS') {
-          if (!Number.isSafeInteger(skill.currentStep) || skill.currentStep < 0 ||
-              !Number.isSafeInteger(skill.totalSteps) || skill.totalSteps < 1 ||
-              skill.currentStep >= skill.totalSteps || !skill.nextBuff) {
-            throw new Error('Habilidade em progresso inválida.');
+        if (skill.status === "IN_PROGRESS") {
+          if (
+            !Number.isSafeInteger(skill.currentStep) ||
+            skill.currentStep < 0 ||
+            !Number.isSafeInteger(skill.totalSteps) ||
+            skill.totalSteps < 1 ||
+            skill.currentStep >= skill.totalSteps ||
+            !skill.nextBuff
+          ) {
+            throw new Error("Habilidade em progresso inválida.");
           }
         } else if (skill.currentStep !== 0 || skill.totalSteps !== null) {
-          throw new Error('Habilidade pública finalizada/configurável inválida.');
+          throw new Error(
+            "Habilidade pública finalizada/configurável inválida.",
+          );
         }
-        if (skill.status === 'AWAITING_LEVEL_CONFIG' && !skill.nextBuff) {
-          throw new Error('Próximo buff ausente.');
+        if (skill.status === "AWAITING_LEVEL_CONFIG" && !skill.nextBuff) {
+          throw new Error("Próximo buff ausente.");
         }
-        if (skill.status === 'COMPLETED' &&
-            (skill.currentLevel !== skill.totalLevels || skill.nextBuff !== null ||
-              skill.earnedBuffs.length !== skill.totalLevels)) {
-          throw new Error('Conclusão pública inválida.');
+        if (
+          skill.status === "COMPLETED" &&
+          (skill.currentLevel !== skill.totalLevels ||
+            skill.nextBuff !== null ||
+            skill.earnedBuffs.length !== skill.totalLevels)
+        ) {
+          throw new Error("Conclusão pública inválida.");
         }
       });
       return progression;
     }
 
     function validateObjectiveState_(data) {
-      if (!data || typeof data !== 'object' ||
-          typeof data.initialized !== 'boolean' ||
-          !Object.prototype.hasOwnProperty.call(data, 'objective')) {
-        throw new Error('Objetivo público inválido.');
+      if (
+        !data ||
+        typeof data !== "object" ||
+        typeof data.initialized !== "boolean" ||
+        !Object.prototype.hasOwnProperty.call(data, "objective")
+      ) {
+        throw new Error("Objetivo público inválido.");
       }
-      const allowedEnvelope = ['initialized', 'objective'];
-      if (Object.keys(data).some(key => !allowedEnvelope.includes(key))) {
-        throw new Error('Objetivo público expõe dados não permitidos.');
+      const allowedEnvelope = ["initialized", "objective"];
+      if (Object.keys(data).some((key) => !allowedEnvelope.includes(key))) {
+        throw new Error("Objetivo público expõe dados não permitidos.");
       }
       if (!data.initialized) {
-        if (data.objective !== null) throw new Error('Objetivo vazio inválido.');
+        if (data.objective !== null)
+          throw new Error("Objetivo vazio inválido.");
         return;
       }
       if (data.objective === null) return;
       const objective = data.objective;
-      if (objective.status !== 'IN_PROGRESS') {
+      if (objective.status !== "IN_PROGRESS") {
         const allowedStatuses = [
-          'COMPLETED', 'AWAITING_LEVEL_CONFIG', 'LOCKED', 'AVAILABLE',
-          'INVALID_REFERENCE',
+          "COMPLETED",
+          "AWAITING_LEVEL_CONFIG",
+          "LOCKED",
+          "AVAILABLE",
+          "INVALID_REFERENCE",
         ];
-        if (!allowedStatuses.includes(objective.status) ||
-            (objective.status !== 'INVALID_REFERENCE' &&
-              (typeof objective.skillId !== 'string' ||
-                typeof objective.name !== 'string' ||
-                !objective.name.trim() ||
-                !Number.isSafeInteger(objective.currentLevel) ||
-                objective.currentLevel < 0))) {
-          throw new Error('Estado público do objetivo inválido.');
+        if (
+          !allowedStatuses.includes(objective.status) ||
+          (objective.status !== "INVALID_REFERENCE" &&
+            (typeof objective.skillId !== "string" ||
+              typeof objective.name !== "string" ||
+              !objective.name.trim() ||
+              !Number.isSafeInteger(objective.currentLevel) ||
+              objective.currentLevel < 0))
+        ) {
+          throw new Error("Estado público do objetivo inválido.");
         }
         return;
       }
       const integerFields = [
-        'currentLevel', 'targetLevel', 'currentStep', 'totalSteps',
-        'remainingSteps',
+        "currentLevel",
+        "targetLevel",
+        "maxTargetLevel",
+        "currentStep",
+        "totalSteps",
+        "remainingSteps",
       ];
-      if (typeof objective.skillId !== 'string' ||
-          typeof objective.name !== 'string' || !objective.name.trim() ||
-          objective.status !== 'IN_PROGRESS' ||
-          integerFields.some(field =>
-            !Number.isSafeInteger(objective[field]) || objective[field] < 0) ||
-          objective.targetLevel !== objective.currentLevel + 1 ||
-          objective.totalSteps < 1 || objective.currentStep >= objective.totalSteps ||
-          objective.remainingSteps !== objective.totalSteps - objective.currentStep ||
-          typeof objective.progressPercent !== 'number' ||
-          !Number.isFinite(objective.progressPercent) ||
-          objective.progressPercent < 0 || objective.progressPercent >= 100 ||
-          !objective.nextBuff || objective.nextBuff.level !== objective.targetLevel ||
-          typeof objective.nextBuff.description !== 'string' ||
-          !objective.nextBuff.description.trim()) {
-        throw new Error('Dados públicos do objetivo inválidos.');
+      if (
+        typeof objective.skillId !== "string" ||
+        typeof objective.name !== "string" ||
+        !objective.name.trim() ||
+        objective.status !== "IN_PROGRESS" ||
+        integerFields.some(
+          (field) =>
+            !Number.isSafeInteger(objective[field]) || objective[field] < 0,
+        ) ||
+        objective.targetLevel <= objective.currentLevel ||
+        objective.targetLevel > objective.maxTargetLevel ||
+        objective.totalSteps < 1 ||
+        objective.currentStep >= objective.totalSteps ||
+        objective.remainingSteps !==
+          (objective.targetLevel - objective.currentLevel) *
+            objective.totalSteps -
+            objective.currentStep ||
+        typeof objective.stepValue !== "number" ||
+        !Number.isSafeInteger(objective.stepValue) ||
+        objective.stepValue < 0 ||
+        typeof objective.costConfigured !== "boolean" ||
+        !objective.projections ||
+        (objective.projections.cost !== null &&
+          (!Number.isSafeInteger(objective.projections.cost) ||
+            objective.projections.cost < 1)) ||
+        ["ideal", "historical", "nextGuildLevel"].some((field) => {
+          const projection = objective.projections[field];
+          return (
+            !projection ||
+            !["AVAILABLE", "UNAVAILABLE"].includes(projection.status) ||
+            (projection.status === "AVAILABLE" &&
+              (!Number.isSafeInteger(projection.days) ||
+                projection.days < 1)) ||
+            (projection.status === "UNAVAILABLE" && projection.days !== null)
+          );
+        }) ||
+        typeof objective.progressPercent !== "number" ||
+        !Number.isFinite(objective.progressPercent) ||
+        objective.progressPercent < 0 ||
+        objective.progressPercent >= 100 ||
+        !objective.nextBuff ||
+        objective.nextBuff.level !== objective.targetLevel ||
+        typeof objective.nextBuff.description !== "string" ||
+        !objective.nextBuff.description.trim()
+      ) {
+        throw new Error("Dados públicos do objetivo inválidos.");
       }
     }
 
     function validateState_(state) {
-      const numericFields = ['level', 'bankBalance', 'xpTotal', 'xpProximoNivel', 'vagas', 'rankingHoje', 'rankingOntem'];
-      if (!state || typeof state.initialized !== 'boolean') {
-        throw new Error('Estado da Guild inválido.');
+      const numericFields = [
+        "level",
+        "bankBalance",
+        "xpTotal",
+        "xpProximoNivel",
+        "vagas",
+        "rankingHoje",
+        "rankingOntem",
+      ];
+      if (!state || typeof state.initialized !== "boolean") {
+        throw new Error("Estado da Guild inválido.");
       }
       if (!state.initialized) {
-        if (numericFields.some(field => state[field] !== null) || state.updatedAt !== null) {
-          throw new Error('Estado vazio inválido.');
+        if (
+          numericFields.some((field) => state[field] !== null) ||
+          state.updatedAt !== null
+        ) {
+          throw new Error("Estado vazio inválido.");
         }
         return;
       }
-      if (numericFields.some(field => !Number.isInteger(state[field]) || state[field] < 0)) {
-        throw new Error('Valores da Guild inválidos.');
+      if (
+        numericFields.some(
+          (field) => !Number.isInteger(state[field]) || state[field] < 0,
+        )
+      ) {
+        throw new Error("Valores da Guild inválidos.");
       }
     }
 
     return {
-      render
+      render,
     };
   })();
 </script>

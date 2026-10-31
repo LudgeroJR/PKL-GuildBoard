@@ -1,8 +1,8 @@
 function doGet() {
-  return HtmlService.createTemplateFromFile('index')
+  return HtmlService.createTemplateFromFile("index")
     .evaluate()
-    .setTitle('PKL Tools')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+    .setTitle("PKL GuildBoard")
+    .addMetaTag("viewport", "width=device-width, initial-scale=1")
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
 
@@ -26,7 +26,9 @@ function runDailyGuildSync() {
 
 function inspectGuildSyncTriggers_() {
   const handlers = ScriptApp.getProjectTriggers()
-    .map(function (trigger) { return trigger.getHandlerFunction(); })
+    .map(function (trigger) {
+      return trigger.getHandlerFunction();
+    })
     .filter(function (name) {
       return name === "runTimeDrivenGuildSync" || name === "runDailyGuildSync";
     });
@@ -47,12 +49,14 @@ function installGuildSyncTriggersWithScriptApp_(scriptApp) {
     }
   });
 
-  scriptApp.newTrigger("runTimeDrivenGuildSync")
+  scriptApp
+    .newTrigger("runTimeDrivenGuildSync")
     .timeBased()
     .everyMinutes(30)
     .create();
 
-  scriptApp.newTrigger("runDailyGuildSync")
+  scriptApp
+    .newTrigger("runDailyGuildSync")
     .timeBased()
     .atHour(6)
     .nearMinute(35)
@@ -61,9 +65,12 @@ function installGuildSyncTriggersWithScriptApp_(scriptApp) {
     .create();
 
   console.log("[installGuildSyncTriggers] Triggers instalados com sucesso.");
-  return scriptApp.getProjectTriggers().map(function (trigger) {
-    return trigger.getHandlerFunction();
-  }).filter(function (name) {
-    return name === "runTimeDrivenGuildSync" || name === "runDailyGuildSync";
-  });
+  return scriptApp
+    .getProjectTriggers()
+    .map(function (trigger) {
+      return trigger.getHandlerFunction();
+    })
+    .filter(function (name) {
+      return name === "runTimeDrivenGuildSync" || name === "runDailyGuildSync";
+    });
 }

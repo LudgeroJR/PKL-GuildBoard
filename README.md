@@ -34,14 +34,15 @@ https://docs.google.com/spreadsheets/d/ESTE_E_O_ID/edit
 
 No editor do Apps Script vá em **Configurações do projeto → Propriedades de script → Editar propriedade do Script** e adicione as chaves abaixo.
 
-| Chave                    | Obrigatória            | Descrição                                                                                                                                        |
-| ------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `SPREADSHEET_ID`         | Sim                    | ID da planilha copiada no passo 1                                                                                                                |
-| `SESSION_SECRET`         | Gerada automaticamente | Deixe em branco; o sistema gera na primeira execução de `setupAdminPassword`                                                                     |
-| `SESSION_DURATION_HOURS` | Gerada automaticamente | Deixe em branco; o sistema define como `6` na primeira execução de `setupAdminPassword`                                                          |
-| `GUILD_NAME`             | Não                    | Nome da sua Guild exibido na interface (ex.: `Arkham`)                                                                                           |
-| `GUILD_LOGO_URL`         | Não                    | URL da imagem da Guild — pode ser a URL da página do Imgur (ex.: `https://imgur.com/AbCd123`) ou qualquer URL pública. Recomendado: 400 × 150 px |
-| `GUILD_API_URL`          | Não                    | URL da API do jogo, se a sua Guild tiver acesso                                                                                                  |
+| Chave                        | Obrigatória            | Descrição                                                                                                                                        |
+| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `SPREADSHEET_ID`             | Sim                    | ID da planilha copiada no passo 1                                                                                                                |
+| `SESSION_SECRET`             | Gerada automaticamente | Coloque o numero 0; o sistema gera na primeira execução de `setupAdminPassword`                                                                  |
+| `SESSION_DURATION_HOURS`     | Gerada automaticamente | Coloque o numero 0; o sistema define como `6` na primeira execução de `setupAdminPassword`                                                       |
+| `GUILD_API_LAST_SYNC_STATUS` | Gerada automaticamente | Coloque o numero 0; o sistema define corretamente na primeira execução de `runTimeDrivenGuildSync`                                               |
+| `GUILD_NAME`                 | Não                    | Nome da sua Guild exibido na interface (ex.: `Arkham`)                                                                                           |
+| `GUILD_LOGO_URL`             | Não                    | URL da imagem da Guild — pode ser a URL da página do Imgur (ex.: `https://imgur.com/AbCd123`) ou qualquer URL pública. Recomendado: 400 × 150 px |
+| `GUILD_API_URL`              | Não                    | URL da API do jogo, se a sua Guild tiver acesso                                                                                                  |
 
 > **Dica — imagem da Guild no Imgur:** hospede no [Imgur](https://imgur.com) e cole a URL da página da imagem diretamente (ex.: `https://imgur.com/dOgObo9`). O sistema converte automaticamente para o link de imagem — **não é necessário buscar o link direto**. URLs de álbum (`https://imgur.com/a/ID`) não são suportadas. Quando não configurada, o nome da Guild aparece no lugar sem espaço em branco.
 

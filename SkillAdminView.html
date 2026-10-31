@@ -220,11 +220,11 @@
         caption: "Habilidades cadastradas",
         columns: [
           {key: "name", label: "Nome"}, {key: "levels", label: "Níveis", align: "center"},
-          {key: "status", label: "Status"}, {key: "apiSkillId", label: "API"}, {key: "requirements", label: "Pré-requisitos"},
+          {key: "stepValue", label: "Gold/step", align: "end"}, {key: "status", label: "Status"}, {key: "apiSkillId", label: "API"}, {key: "requirements", label: "Pré-requisitos"},
           {key: "actions", label: "Ações", align: "end"},
         ],
         rows: catalog.map(skill => ({
-          name: skill.name, levels: String(skill.totalLevels), status: badge_(skill.status),
+          name: skill.name, levels: String(skill.totalLevels), stepValue: skill.stepValue > 0 ? String(skill.stepValue) : "Não configurado", status: badge_(skill.status),
           apiSkillId: skill.apiSkillId || "Sem vínculo",
           requirements: requirementsText_(skill, catalog), actions: actions_(skill, edit, link),
         })),
@@ -247,7 +247,7 @@
         name.className = "pkl-skill-card__name";
         name.textContent = skill.name;
         details.className = "pkl-skill-card__details";
-        details.append(detail_("Níveis", skill.totalLevels), detail_("API", skill.apiSkillId || "Sem vínculo"), detail_("Pré-requisitos", requirementsText_(skill, catalog)));
+        details.append(detail_("Níveis", skill.totalLevels), detail_("Gold por step", skill.stepValue > 0 ? skill.stepValue : "Não configurado"), detail_("API", skill.apiSkillId || "Sem vínculo"), detail_("Pré-requisitos", requirementsText_(skill, catalog)));
         actions.className = "pkl-skill-card__actions";
         actions.append(actions_(skill, edit, link));
         head.append(name, badge_(skill.status));
@@ -269,6 +269,8 @@
       const name = UI.Input({label: "Nome da habilidade", value: original ? original.name : "", required: true, autocomplete: "off", helperText: "De 1 a 100 caracteres."});
       const levels = UI.Input({label: "Quantidade total de níveis", type: "number", value: original ? original.totalLevels : 1, required: true,
         helperText: original && original.apiSkillId ? "Limite governado pela API da Guild." : "Número inteiro maior ou igual a 1."});
+      const stepValue = UI.Input({label: "Gold por step", type: "number", value: original ? original.stepValue : 0, required: true,
+        helperText: "Zero significa custo não configurado."});
       const notice = document.createElement("p");
       const buffSection = section_("Buffs por nível");
       const requirementSection = section_("Pré-requisitos");
@@ -292,19 +294,21 @@
       form.noValidate = true;
       basics.className = "pkl-skill-editor__basic";
       levels.input.min = "1"; levels.input.step = "1"; levels.input.inputMode = "numeric";
+      stepValue.input.min = "0"; stepValue.input.step = "1"; stepValue.input.inputMode = "numeric";
       levels.input.disabled = !!(original && original.apiSkillId);
       notice.className = "pkl-skill-editor__structural-notice"; notice.setAttribute("role", "status"); notice.hidden = true;
       requirementHeader.append(addRequirement);
       error.className = "pkl-status pkl-status--error"; error.setAttribute("role", "alert"); error.tabIndex = -1; error.hidden = true;
       dirty.className = "pkl-skill-editor__dirty-status"; dirty.setAttribute("role", "status"); dirty.setAttribute("aria-live", "polite");
       actions.className = "pkl-skill-editor__actions"; actions.append(cancel, save);
-      basics.append(name.element, levels.element);
+      basics.append(name.element, levels.element, stepValue.element);
       form.append(basics, notice, buffSection.element, requirementSection.element, error, dirty, actions);
       root.append(title, form);
       renderBuffs_(); renderRequirements_();
       const baseline = state_();
 
       name.input.addEventListener("input", changed_);
+      stepValue.input.addEventListener("input", changed_);
       levels.input.addEventListener("input", () => { captureBuffs_(); if (positive_(levels.input.value) !== null) renderBuffs_(); changed_(); });
       form.addEventListener("submit", submit_);
       refresh_();
@@ -372,7 +376,7 @@
       function state_() {
         captureBuffs_(); const total = positive_(levels.input.value);
         return JSON.stringify({
-          name: name.input.value, totalLevels: total === null ? levels.input.value : total,
+          name: name.input.value, totalLevels: total === null ? levels.input.value : total, stepValue: stepValue.input.value,
           buffs: total === null ? [] : Array.from({length: total}, (_, index) => descriptions[index + 1] || ""),
           requirements: requirementControls.map(item => ({requiredSkillId: item.skill.select.value, minimumLevel: item.minimum.input.value})),
         });
@@ -392,9 +396,11 @@
       function payload_() {
         captureBuffs_(); let first = null;
         const skillName = name.input.value.trim(); const total = positive_(levels.input.value);
+        const cost = nonNegative_(stepValue.input.value);
         name.setError(null); levels.setError(null);
         if (!skillName || skillName.length > 100) { name.setError("Informe um nome entre 1 e 100 caracteres."); first = name.input; }
         if (total === null) { levels.setError("Informe um número inteiro maior ou igual a 1."); if (!first) first = levels.input; }
+        if (cost === null) { stepValue.setError("Informe um inteiro maior ou igual a zero."); if (!first) first = stepValue.input; }
         const buffs = [];
         buffFields.forEach(item => {
           const description = item.field.input.value.trim();
@@ -410,8 +416,8 @@
           if (skillError && !first) first = control.skill.select; if (levelError && !first) first = control.minimum.input;
           if (requiredSkillId) seen[requiredSkillId] = true; finalRequirements.push({requiredSkillId, minimumLevel});
         });
-        if (first || total === null) { first.focus(); return null; }
-        return Object.assign(original ? {skillId: original.skillId} : {}, {name: skillName, totalLevels: total, buffs, requirements: finalRequirements});
+        if (first || total === null || cost === null) { first.focus(); return null; }
+        return Object.assign(original ? {skillId: original.skillId} : {}, {name: skillName, totalLevels: total, stepValue: cost, buffs, requirements: finalRequirements});
       }
 
       async function submit_(event) {
@@ -499,13 +505,14 @@
     function requirementsText_(skill, catalog) { if (!skill.requirements.length) return "Nenhum"; const names = Object.create(null); catalog.forEach(item => { names[item.skillId] = item.name; }); return skill.requirements.map(item => `${names[item.requiredSkillId]} ≥ nível ${item.minimumLevel}`).join("; "); }
     function byId_(catalog, id) { return catalog.find(item => item.skillId === id) || null; }
     function positive_(value) { const text = String(value).trim(); if (!/^\d+$/.test(text)) return null; const number = Number(text); return Number.isInteger(number) && number >= 1 ? number : null; }
+    function nonNegative_(value) { const text = String(value).trim(); if (!/^\d+$/.test(text)) return null; const number = Number(text); return Number.isSafeInteger(number) && number >= 0 ? number : null; }
     function discard_() { return UI.ConfirmDialog({title: "Descartar alterações não salvas?", message: "As alterações feitas neste editor serão perdidas. Deseja continuar?", confirmLabel: "Descartar alterações", danger: true}).open(); }
 
     function validateCatalog_(catalog) {
       if (!Array.isArray(catalog)) throw new Error("Catálogo administrativo inválido.");
       const ids = Object.create(null);
       catalog.forEach(skill => {
-        if (!skill || typeof skill.skillId !== "string" || typeof skill.apiSkillId !== "string" || typeof skill.name !== "string" || !skill.name.trim() || !Number.isInteger(skill.totalLevels) || skill.totalLevels < 1 || !Array.isArray(skill.buffs) || skill.buffs.length !== skill.totalLevels || !Array.isArray(skill.requirements) || !STATUS[skill.status] || !Number.isInteger(skill.currentLevel) || skill.currentLevel < 0 || typeof skill.createdAt !== "string" || typeof skill.updatedAt !== "string") throw new Error("Habilidade inválida no catálogo administrativo.");
+        if (!skill || typeof skill.skillId !== "string" || typeof skill.apiSkillId !== "string" || typeof skill.name !== "string" || !skill.name.trim() || !Number.isInteger(skill.totalLevels) || skill.totalLevels < 1 || !Number.isSafeInteger(skill.stepValue) || skill.stepValue < 0 || !Array.isArray(skill.buffs) || skill.buffs.length !== skill.totalLevels || !Array.isArray(skill.requirements) || !STATUS[skill.status] || !Number.isInteger(skill.currentLevel) || skill.currentLevel < 0 || typeof skill.createdAt !== "string" || typeof skill.updatedAt !== "string") throw new Error("Habilidade inválida no catálogo administrativo.");
         if (ids[skill.skillId]) throw new Error("Habilidade duplicada no catálogo administrativo."); ids[skill.skillId] = true;
         const levels = Object.create(null);
         skill.buffs.forEach(buff => {

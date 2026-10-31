@@ -12,7 +12,7 @@ function runGuildApiSync_() {
     // Pre-flight: validate week consistency before acquiring lock.
     validateGuildApiWeekConsistency_(apiData.semana, apiData.loja);
 
-    let membersResult, skillsResult, guildStateResult, contributionsResult, weeklyTasksResult;
+    let membersResult, skillsResult, guildStateResult, contributionsResult, weeklyTasksResult, historyResult;
 
     runWithDatabaseWriteLock_(function () {
       /*
@@ -31,6 +31,7 @@ function runGuildApiSync_() {
           apiData.semana,
           apiData.loja,
         );
+        historyResult = syncGuildHistoryFromGuildApi_(apiData);
         weeklyTasksResult = syncWeeklyTasksFromGuildApi_(apiData.semana);
         commitDatabaseWrites_();
       } catch (nucleoError) {
@@ -51,6 +52,7 @@ function runGuildApiSync_() {
       guildState: guildStateResult,
       contributions: contributionsResult,
       weeklyTasks: weeklyTasksResult,
+      history: historyResult,
       daily: dailyResult,
     };
     recordGuildApiSyncStatus_({
@@ -153,6 +155,7 @@ function buildGuildApiSyncNucleoSnapshot_() {
     skills: readDatabaseTableUncached_("Skills"),
     skillStates: readDatabaseTableUncached_("SkillState"),
     guildStates: readDatabaseTableUncached_("GuildState"),
+    guildHistory: readDatabaseTableUncached_("GuildHistory"),
     contributions: readDatabaseTableUncached_("Contributions"),
     weeklyTasks: readDatabaseTableUncached_("WeeklyTasks"),
   };
@@ -168,6 +171,11 @@ function restoreGuildApiSyncNucleoSnapshot_(snapshot) {
       uniqueKeyFields: ["skillId"],
     },
     { sheetName: "GuildState", records: snapshot.guildStates },
+    {
+      sheetName: "GuildHistory",
+      records: snapshot.guildHistory,
+      uniqueKeyFields: ["gameDayKey"],
+    },
     {
       sheetName: "Contributions",
       records: snapshot.contributions,
@@ -668,6 +676,7 @@ function syncSkillsFromGuildApi_(apiSkills) {
           apiSkillId: apiSkillId,
           name: apiSkill.name,
           totalLevels: apiSkill.nivelMax,
+          stepValue: 0,
           createdAt: now,
           updatedAt: now,
         });
@@ -773,6 +782,7 @@ function syncGuildStateFromGuildApi_(apiGuild) {
       {
         guildStateId: current === null ? generateUuid_() : current.guildStateId,
         currentObjectiveSkillId: current === null ? null : current.currentObjectiveSkillId,
+        currentObjectiveTargetLevel: current === null ? null : current.currentObjectiveTargetLevel,
         createdAt: current === null ? now : current.createdAt,
         updatedAt: now,
       },

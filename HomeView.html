@@ -15,10 +15,10 @@
       section.setAttribute("aria-labelledby", "pkl-home-title");
 
       section.innerHTML = `
-        <h1 id="pkl-home-title" class="pkl-view__title">Início</h1>
+        <h1 id="pkl-home-title" class="pkl-view__title">Ranking semanal</h1>
 
         <p class="pkl-view__description">
-          Ranking semanal da Guild no Poke Legends.
+          Acompanhe o desempenho semanal dos membros da Guild.
         </p>
       `;
 
@@ -29,7 +29,6 @@
       const topLevelHost = document.createElement("div");
       const taskRankingHost = document.createElement("div");
       const bankHost = document.createElement("div");
-      const objectiveHost = document.createElement("div");
       const highlights = document.createElement("div");
       highlights.className = "pkl-home-highlights";
 
@@ -78,7 +77,7 @@
       currentTitle.textContent = "Situação atual da Guild";
       currentGrid.className = "pkl-home-current__grid";
       currentGrid.append(bankHost, membersHost);
-      current.append(currentTitle, currentGrid, objectiveHost);
+      current.append(currentTitle, currentGrid);
 
       content.append(
         buildCaptureIdentity_(),
@@ -101,13 +100,6 @@
           validateState_,
           buildBank_,
           "o Guild Bank",
-        );
-        loadSection_(
-          objectiveHost,
-          "guild.getPublicObjective",
-          validateObjective_,
-          buildObjective_,
-          "o objetivo atual",
         );
       });
 
@@ -358,57 +350,6 @@
       }).element;
     }
 
-    function buildObjective_(data) {
-      let body;
-
-      if (!data.initialized || data.objective === null) {
-        body = UI.EmptyState({
-          title: data.initialized
-            ? "Nenhum objetivo definido"
-            : "Objetivo indisponível",
-          description: data.initialized
-            ? "A administração ainda não selecionou uma habilidade."
-            : "A Guild ainda não foi configurada.",
-          icon: "shield",
-        }).element;
-      } else {
-        const objective = data.objective;
-        body = document.createElement("div");
-        body.className = "pkl-home-objective";
-
-        const name = document.createElement("p");
-        name.className = "pkl-home-objective__name";
-        name.textContent = `${objective.name} — nível ${objective.currentLevel} → ${objective.targetLevel}`;
-
-        const remaining = document.createElement("p");
-        remaining.className = "pkl-home-objective__remaining";
-        remaining.textContent = `Steps restantes: ${objective.remainingSteps}`;
-
-        body.append(
-          name,
-          UI.Progress({
-            label: "Progresso do objetivo",
-            value: objective.progressPercent,
-            max: 100,
-            valueText: `${new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 }).format(objective.progressPercent)}%`,
-          }).element,
-          remaining,
-        );
-      }
-
-      const link = UI.Button({
-        label: "Ver detalhes na Guild",
-        variant: "secondary",
-        onClick: () => Router.navigate("#/guild"),
-      });
-
-      return UI.Card({
-        title: "Objetivo atual",
-        body,
-        footer: link,
-      }).element;
-    }
-
     function buildInstitutional_() {
       const section = document.createElement("section");
       const text = document.createElement("p");
@@ -428,31 +369,6 @@
         (!Number.isInteger(state.bankBalance) || state.bankBalance < 0)
       ) {
         throw new Error("Guild Bank inválido.");
-      }
-    }
-
-    function validateObjective_(data) {
-      if (
-        !data ||
-        typeof data.initialized !== "boolean" ||
-        !Object.prototype.hasOwnProperty.call(data, "objective")
-      ) {
-        throw new Error("Objetivo público inválido.");
-      }
-      const o = data.objective;
-      if (
-        data.initialized &&
-        o !== null &&
-        (typeof o.name !== "string" ||
-          !o.name.trim() ||
-          !Number.isSafeInteger(o.currentLevel) ||
-          !Number.isSafeInteger(o.targetLevel) ||
-          !Number.isSafeInteger(o.remainingSteps) ||
-          o.remainingSteps < 1 ||
-          typeof o.progressPercent !== "number" ||
-          !Number.isFinite(o.progressPercent))
-      ) {
-        throw new Error("Objetivo público inválido.");
       }
     }
 

@@ -344,9 +344,9 @@
         "Nome",
         "Cargo",
         "Nível",
-        "Contribuição",
         "Task",
         "Meta",
+        "Status",
       ].forEach((label) => {
         const cell = document.createElement("span");
         cell.setAttribute("role", "columnheader");
@@ -392,13 +392,6 @@
       );
       row.appendChild(
         buildRankingCell_(
-          "amount",
-          "Contribuição",
-          UtilitiesClient.formatGameMoney(member.amount),
-        ),
-      );
-      row.appendChild(
-        buildRankingCell_(
           "tasks",
           "Task",
           member.tasksDelivered === null || member.tasksDelivered === undefined
@@ -414,6 +407,14 @@
       targetCell.setAttribute("data-label", "Meta");
       targetCell.appendChild(buildTargetCell_(member));
       row.appendChild(targetCell);
+
+      const statusCell = document.createElement("div");
+      statusCell.className =
+        "pkl-ranking-row__cell pkl-ranking-row__cell--status";
+      statusCell.setAttribute("role", "cell");
+      statusCell.setAttribute("data-label", "Status");
+      statusCell.appendChild(buildTargetStatusCell_(member));
+      row.appendChild(statusCell);
 
       return row;
     }
@@ -436,25 +437,47 @@
       const wrapper = document.createElement("div");
       wrapper.className = "pkl-ranking-row__target";
 
+      const text = document.createElement("span");
+      text.className = "pkl-ranking-row__target-text";
+
       if (member.targetRequired === false) {
-        wrapper.appendChild(
-          UI.Badge({ label: "Sem meta", variant: "neutral" }),
-        );
+        text.textContent = "—";
+        text.setAttribute("aria-label", "Sem meta");
+        wrapper.appendChild(text);
         return wrapper;
       }
 
-      const text = document.createElement("span");
-      text.className = "pkl-ranking-row__target-text";
       text.textContent = `${UtilitiesClient.formatGameMoney(member.amount)} / ${UtilitiesClient.formatGameMoney(member.targetAmount)}`;
       wrapper.appendChild(text);
 
-      if (member.targetMet === true) {
-        wrapper.appendChild(
-          UI.Badge({ label: "Meta cumprida", variant: "success" }),
-        );
+      return wrapper;
+    }
+
+    function buildTargetStatusCell_(member) {
+      const status = document.createElement("span");
+      status.className = "pkl-ranking-row__status-icon";
+
+      if (member.targetRequired === false) {
+        status.classList.add("pkl-ranking-row__status-icon--none");
+        status.textContent = "—";
+        status.setAttribute("aria-label", "Sem meta");
+        status.title = "Sem meta";
+        return status;
       }
 
-      return wrapper;
+      const completed = member.targetMet === true;
+      status.classList.add(
+        completed
+          ? "pkl-ranking-row__status-icon--met"
+          : "pkl-ranking-row__status-icon--not-met",
+      );
+      status.textContent = completed ? "✓" : "✕";
+      status.setAttribute(
+        "aria-label",
+        completed ? "Meta cumprida" : "Meta não cumprida",
+      );
+      status.title = completed ? "Meta cumprida" : "Meta não cumprida";
+      return status;
     }
 
     function formatGuildRoleLabel_(guildRole) {
