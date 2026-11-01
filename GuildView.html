@@ -762,13 +762,13 @@
         metrics.appendChild(UI.StatCard({ label, value }).element);
       });
 
-      body.append(
-        summary,
-        buff,
-        progress.element,
-        metrics,
-        buildProjectionSummary_(objective.projections),
-      );
+      const main = document.createElement("div");
+      main.className = "pkl-guild-objective__main";
+      main.append(summary, buff, progress.element);
+      const aside = document.createElement("div");
+      aside.className = "pkl-guild-objective__aside";
+      aside.append(metrics, buildProjectionSummary_(objective.projections));
+      body.append(main, aside);
       section.appendChild(body);
       return section;
     }
@@ -854,7 +854,12 @@
 
       const grid = document.createElement("div");
       grid.className = "pkl-guild-skills__grid";
-      progression.forEach((skill) => grid.appendChild(buildSkillCard_(skill)));
+      // Em progresso primeiro, concluídas por último; a ordem do backend é mantida dentro de cada grupo.
+      const statusOrder = { IN_PROGRESS: 0, AWAITING_LEVEL_CONFIG: 1, COMPLETED: 2 };
+      progression
+        .slice()
+        .sort((a, b) => statusOrder[a.status] - statusOrder[b.status])
+        .forEach((skill) => grid.appendChild(buildSkillCard_(skill)));
       section.appendChild(grid);
       return section;
     }
@@ -905,7 +910,12 @@
           item.textContent = `Nível ${buff.level} — ${buff.description}`;
           buffs.appendChild(item);
         });
-        body.appendChild(info_("Buffs conquistados", buffs));
+        const details = document.createElement("details");
+        const summaryToggle = document.createElement("summary");
+        details.className = "pkl-guild-skill-card__buffs-toggle";
+        summaryToggle.textContent = `Buffs conquistados (${skill.earnedBuffs.length})`;
+        details.append(summaryToggle, buffs);
+        body.appendChild(details);
       }
 
       return UI.Card({

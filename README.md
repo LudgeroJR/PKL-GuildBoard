@@ -32,7 +32,7 @@ https://docs.google.com/spreadsheets/d/ESTE_E_O_ID/edit
 
 ### 3. Configure as Script Properties
 
-No editor do Apps Script vá em **Configurações do projeto → Propriedades de script → Editar propriedade do Script** e adicione as chaves abaixo.
+No editor do Apps Script vá em **Configurações do projeto → Propriedades de script → Adicionar propriedade do Script** e adicione as chaves abaixo.
 
 | Chave                        | Obrigatória            | Descrição                                                                                                                                        |
 | ---------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -52,7 +52,7 @@ No editor do Apps Script vá em **Configurações do projeto → Propriedades de
 
 O editor do Apps Script não aceita chamar funções com parâmetros diretamente. Use o seguinte procedimento:
 
-1. Abra qualquer arquivo `.gs` no editor (ex.: `Auth.js`).
+1. Abra qualquer arquivo `.gs` no editor (ex.: `Auth.gs`).
 2. **Adicione temporariamente** no final do arquivo:
    ```js
    function inicializar() {

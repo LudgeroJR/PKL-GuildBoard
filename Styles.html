@@ -5021,23 +5021,81 @@
       align-items: stretch;
     }
 
-    .pkl-guild-view__overview-host,
-    .pkl-guild-view__history-host {
+    .pkl-guild-view__content > * {
       grid-column: 1 / -1;
     }
+  }
 
-    .pkl-guild-view__objective-host {
-      grid-column: span 5;
+  /* ---- Objetivo: faixa horizontal; habilidades: grade densa ---- */
+
+  .pkl-guild-objective__main,
+  .pkl-guild-objective__aside {
+    display: grid;
+    align-content: start;
+    gap: var(--pkl-space-16);
+    min-width: 0;
+  }
+
+  @media (min-width: 900px) {
+    .pkl-guild-objective__body {
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+      gap: var(--pkl-space-32);
+      align-items: start;
     }
 
-    .pkl-guild-view__skills-host {
-      grid-column: span 7;
+    .pkl-guild-objective__aside {
+      padding-left: var(--pkl-space-32);
+      border-left: 1px solid var(--pkl-color-hairline);
     }
+  }
 
-    .pkl-guild-view__objective-host > *,
-    .pkl-guild-view__skills-host > * {
-      height: 100%;
-    }
+  .pkl-guild-skills__grid {
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+    align-items: start;
+  }
+
+  .pkl-guild-skill-card .pkl-card__header {
+    padding: var(--pkl-space-16) var(--pkl-space-16) var(--pkl-space-12);
+  }
+
+  .pkl-guild-skill-card .pkl-card__body {
+    padding: var(--pkl-space-16);
+  }
+
+  .pkl-guild-skill-card__buffs-toggle > summary {
+    display: flex;
+    align-items: center;
+    min-height: var(--pkl-touch-target);
+    color: var(--pkl-color-text-muted);
+    font-size: var(--pkl-font-size-14);
+    cursor: pointer;
+  }
+
+  .pkl-guild-skill-card__buffs-toggle > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .pkl-guild-skill-card__buffs-toggle > summary::after {
+    content: "";
+    width: 7px;
+    height: 7px;
+    margin-left: auto;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: translateY(-2px) rotate(45deg);
+    transition: transform var(--pkl-motion-fast) var(--pkl-easing-standard);
+  }
+
+  .pkl-guild-skill-card__buffs-toggle[open] > summary::after {
+    transform: translateY(2px) rotate(-135deg);
+  }
+
+  .pkl-guild-skill-card__buffs-toggle > summary:hover {
+    color: var(--pkl-color-text);
+  }
+
+  .pkl-guild-skill-card__buffs-toggle[open] > summary {
+    margin-bottom: var(--pkl-space-4);
   }
 
   /* ---- Histórico diário ---- */
