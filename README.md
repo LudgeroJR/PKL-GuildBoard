@@ -4,6 +4,12 @@ Ferramenta Google Apps Script para acompanhar o desenvolvimento de uma Guild no 
 
 ---
 
+## Prefere assistir a um vídeo?
+
+[![Tutorial de instalação do PKL GuildBoard](docs/video-thumb.svg)](https://vimeo.com/1242090187/cb9473f000?fl=tl&fe=ec)
+
+---
+
 ## Instalação passo a passo
 
 ### 1. Copie a planilha template

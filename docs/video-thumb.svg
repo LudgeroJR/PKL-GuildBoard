@@ -1,0 +1,48 @@
+<svg width="100%" viewBox="0 0 680 383" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>PKL GuildBoard – Tutorial de Instalação</title>
+  <desc>Thumbnail do vídeo tutorial de instalação do PKL GuildBoard</desc>
+
+  <rect width="680" height="383" fill="#0f0f1a"/>
+
+  <circle cx="80" cy="80" r="120" fill="#1a1a3e" opacity="0.6"/>
+  <circle cx="600" cy="300" r="160" fill="#1a1a3e" opacity="0.6"/>
+  <circle cx="580" cy="60" r="60" fill="#2a1a4e" opacity="0.5"/>
+  <circle cx="100" cy="330" r="80" fill="#2a1a4e" opacity="0.4"/>
+
+  <line x1="0" y1="191" x2="680" y2="191" stroke="#ffffff" stroke-width="0.5" opacity="0.06"/>
+  <line x1="340" y1="0" x2="340" y2="383" stroke="#ffffff" stroke-width="0.5" opacity="0.06"/>
+
+  <circle cx="540" cy="290" r="40" fill="none" stroke="#c0392b" stroke-width="1.5" opacity="0.3"/>
+  <line x1="500" y1="290" x2="580" y2="290" stroke="#c0392b" stroke-width="1.5" opacity="0.3"/>
+  <circle cx="540" cy="290" r="6" fill="#c0392b" opacity="0.4"/>
+  <circle cx="140" cy="90" r="28" fill="none" stroke="#c0392b" stroke-width="1" opacity="0.25"/>
+  <line x1="112" y1="90" x2="168" y2="90" stroke="#c0392b" stroke-width="1" opacity="0.25"/>
+  <circle cx="140" cy="90" r="4" fill="#c0392b" opacity="0.3"/>
+
+  <polygon points="60,340 66,346 60,352" fill="#e74c3c" opacity="0.5"/>
+  <polygon points="610,40 616,46 610,52" fill="#e74c3c" opacity="0.5"/>
+  <rect x="30" y="160" width="4" height="4" rx="1" fill="#8e44ad" opacity="0.4"/>
+  <rect x="645" y="210" width="4" height="4" rx="1" fill="#8e44ad" opacity="0.4"/>
+
+  <text x="340" y="112" text-anchor="middle"
+        font-family="'Segoe UI', 'Arial', sans-serif"
+        font-size="13" font-weight="600" letter-spacing="4"
+        fill="#e74c3c" opacity="0.9">PKL TOOLS</text>
+
+  <text x="340" y="170" text-anchor="middle"
+        font-family="'Segoe UI', 'Arial', sans-serif"
+        font-size="44" font-weight="700" letter-spacing="1"
+        fill="#ffffff">GuildBoard</text>
+
+  <circle cx="340" cy="255" r="44" fill="#e74c3c" opacity="0.15"/>
+  <circle cx="340" cy="255" r="36" fill="none" stroke="#e74c3c" stroke-width="2" opacity="0.7"/>
+  <polygon points="330,242 330,268 358,255" fill="#ffffff"/>
+
+  <rect x="0" y="336" width="680" height="47" fill="#e74c3c" opacity="0.12"/>
+  <rect x="0" y="336" width="680" height="2" fill="#e74c3c" opacity="0.5"/>
+
+  <text x="340" y="366" text-anchor="middle"
+        font-family="'Segoe UI', 'Arial', sans-serif"
+        font-size="16" font-weight="400" letter-spacing="2"
+        fill="#ffffff" opacity="0.85">TUTORIAL DE INSTALAÇÃO</text>
+</svg>
