@@ -29,7 +29,10 @@ function buildGuildHistoryUpsertRecord_(input) {
       xpTotal: existing && existing.xpTotal > effectiveXp ? existing.xpTotal : effectiveXp,
       totalContributed: totalContributed,
       xpDelta: existing && existing.xpDelta !== null && xpRegressed ? existing.xpDelta : xpDelta,
-      goldDelta: existing && existing.goldDelta !== null ? existing.goldDelta : goldDelta,
+      // O snapshot acumulado pode crescer durante o mesmo dia. Recalcular o
+      // delta mantém o histórico refletindo o último sync; o baseline segue
+      // nulo porque `goldDelta` continua nulo quando `previous` é inexistente.
+      goldDelta: goldDelta,
       createdAt: existing ? existing.createdAt : now,
       updatedAt: now,
     },

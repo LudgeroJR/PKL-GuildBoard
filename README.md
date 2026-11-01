@@ -70,7 +70,21 @@ O editor do Apps Script não aceita chamar funções com parâmetros diretamente
 
 ---
 
-### 5. Configure o Trigger de sincronização
+### 5. Faça o deploy como Web App
+
+1. Clique em **Implantar → Nova implantação**.
+2. Tipo: **Aplicativo da Web**.
+3. Configurações recomendadas:
+   - **Executar como:** Eu (conta do proprietário)
+   - **Quem tem acesso:** Qualquer pessoa
+4. Clique em **Implantar** e copie a **URL do Web App**.
+
+Acesse o Sistema, na area de Admin para testar a senha e já configure a meta diária antes do primeiro acesso a API.
+Compartilhe essa URL com os membros da sua Guild.
+
+---
+
+### 6. Configure o Trigger de sincronização
 
 O GuildBoard sincroniza dados do jogo automaticamente via um trigger programado.
 
@@ -84,19 +98,6 @@ O GuildBoard sincroniza dados do jogo automaticamente via um trigger programado.
 4. Clique em **Salvar** e autorize as permissões se solicitado.
 
 > O trigger só sincroniza se a Script Property `GUILD_API_URL` estiver configurada. Sem ela, a sincronização é ignorada silenciosamente.
-
----
-
-### 6. Faça o deploy como Web App
-
-1. Clique em **Implantar → Nova implantação**.
-2. Tipo: **Aplicativo da Web**.
-3. Configurações recomendadas:
-   - **Executar como:** Eu (conta do proprietário)
-   - **Quem tem acesso:** Qualquer pessoa
-4. Clique em **Implantar** e copie a **URL do Web App**.
-
-Compartilhe essa URL com os membros da sua Guild.
 
 ---
 
