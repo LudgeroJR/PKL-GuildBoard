@@ -33,7 +33,7 @@ https://docs.google.com/spreadsheets/d/ESTE_E_O_ID/edit
    - Arquivos `.js` → tipo **Script**
    - Arquivos `.html` → tipo **HTML**
    - O arquivo `appsscript.json` substitui o manifesto padrão (ative a exibição do manifesto em **Configurações do projeto → Mostrar arquivo "appsscript.json"**).
-   - Para quem tem familiaridade com linha de comando, existe uma forma alternativa para este passo no final do Roteiro.
+     > Para quem tem familiaridade com linha de comando, existe uma forma alternativa para este passo no final do Roteiro.
 
 ---
 
