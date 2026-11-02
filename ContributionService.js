@@ -618,6 +618,28 @@ function getCurrentContributionWeek_() {
   return toContributionWeekApiDto_(context);
 }
 
+function getCompletedWeeklyContributionTotals_() {
+  const currentWeekKey = getCurrentGameWeekKey_();
+  const totals = Object.create(null);
+  const seenMembers = Object.create(null);
+  findAllContributions_().forEach(function (contribution) {
+    assertValidStoredContribution_(contribution);
+    if (contribution.weekKey >= currentWeekKey) return;
+    if (!seenMembers[contribution.weekKey]) {
+      seenMembers[contribution.weekKey] = Object.create(null);
+    }
+    if (Object.prototype.hasOwnProperty.call(seenMembers[contribution.weekKey], contribution.memberId)) {
+      throw new Error("Existem Contributions duplicadas para o mesmo membro na semana histórica.");
+    }
+    seenMembers[contribution.weekKey][contribution.memberId] = true;
+    totals[contribution.weekKey] = (totals[contribution.weekKey] || 0) + contribution.amount;
+    assertSafeContributionAggregate_(totals[contribution.weekKey], "weeklyContributionTotal");
+  });
+  return Object.keys(totals).sort().slice(-4).map(function (weekKey) {
+    return {weekKey: weekKey, totalContributed: totals[weekKey]};
+  });
+}
+
 function toContributionWeekApiDto_(context) {
   if (!isObject_(context)) {
     throw new Error("Contexto semanal de Contributions inválido.");
@@ -1546,6 +1568,14 @@ function getPublicContributionRanking_() {
     buildPublicHistoricalContributionRankingWeekDto_,
   );
 
+  const historicalTaskWeeks = buildWeeklyTasksByWeekIndex_(
+    findAllWeeklyTasks_(),
+    history.map(function (week) { return week.weekKey; }),
+  );
+  history.forEach(function (week) {
+    enrichRankingWeekWithTasks_(week, historicalTaskWeeks[week.weekKey] || []);
+  });
+
   const weeklyTasks = findWeeklyTasksByWeekKey_(weekKey);
   const memberNameIndex = buildContributionMemberNameIndex_(members);
 
@@ -1670,6 +1700,42 @@ function enrichCurrentRankingWithTasks_(
     members: enrichedMembers,
     tasksRanking: rankedTaskEntries,
   });
+}
+
+function buildWeeklyTasksByWeekIndex_(tasks, includedWeekKeys) {
+  if (!Array.isArray(tasks) || !Array.isArray(includedWeekKeys)) {
+    throw new Error("Dados históricos de tasks inválidos.");
+  }
+  const included = Object.create(null);
+  includedWeekKeys.forEach(function (weekKey) {
+    included[validateGameWeekKey_(weekKey, "weekKey")] = true;
+  });
+  const index = Object.create(null);
+  tasks.forEach(function (task) {
+    validateObject_(task, "weeklyTask");
+    validateGameWeekKey_(task.weekKey, "weekKey");
+    if (!Object.prototype.hasOwnProperty.call(included, task.weekKey)) return;
+    validateUuid_(task.weeklyTaskId, "weeklyTaskId");
+    validateUuid_(task.memberId, "memberId");
+    validateNonNegativeInteger_(task.delivered, "delivered");
+    if (!index[task.weekKey]) index[task.weekKey] = Object.create(null);
+    if (Object.prototype.hasOwnProperty.call(index[task.weekKey], task.memberId)) {
+      throw new Error("Existem tasks semanais duplicadas para o mesmo membro.");
+    }
+    index[task.weekKey][task.memberId] = task.delivered;
+  });
+  return Object.keys(index).reduce(function (result, weekKey) {
+    result[weekKey] = index[weekKey];
+    return result;
+  }, Object.create(null));
+}
+
+function enrichRankingWeekWithTasks_(week, tasksByMemberId) {
+  week.members.forEach(function (member) {
+    member.tasksDelivered = Object.prototype.hasOwnProperty.call(tasksByMemberId, member.memberId)
+      ? tasksByMemberId[member.memberId] : null;
+  });
+  return week;
 }
 
 /*

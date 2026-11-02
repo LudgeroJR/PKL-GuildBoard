@@ -2,6 +2,8 @@
 
 Ferramenta Google Apps Script para acompanhar o desenvolvimento de uma Guild no Poke Legends.
 
+**Versão atual do repositório: 1.0.0**
+
 ---
 
 ## Prefere assistir a um vídeo?
@@ -106,6 +108,36 @@ O GuildBoard sincroniza dados do jogo automaticamente via um trigger programado.
 4. Clique em **Salvar** e autorize as permissões se solicitado.
 
 > O trigger só sincroniza se a Script Property `GUILD_API_URL` estiver configurada. Sem ela, a sincronização é ignorada silenciosamente.
+
+---
+
+## Atualizando o sistema
+
+Se você já tem o PKL GuildBoard instalado e quer atualizar para a versão mais recente do repositório, siga este roteiro.
+
+### Como verificar sua versão atual
+
+Abra o sistema no navegador e procure a versão exibida na interface. Compare com a **Versão atual do repositório** indicada no topo deste arquivo.
+
+### Como atualizar
+
+> **Importante:** Sempre atualize versão por versão, em ordem. Se seu sistema estiver na versão 1.0.0 e o repositório estiver na 1.0.2, você deve aplicar primeiro a atualização da 1.0.1 e depois a da 1.0.2.
+
+Para cada versão entre a sua atual e a mais recente:
+
+1. Consulte o **Histórico de atualizações** abaixo e identifique quais arquivos foram modificados em todas as versões pendentes.
+2. Atualize apenas os arquivos listados do repositório para o seu projeto no Apps Script, substituindo os existentes.
+3. Faça um novo deploy (**Implantar → Gerenciar implantações → Editar → Nova versão → Implantar**).
+
+> Para quem usa clasp: após substituir os arquivos localmente, execute `clasp push` e faça o deploy normalmente.
+
+---
+
+## Histórico de atualizações
+
+| Versão | Data       | Arquivos modificados | Descrição      |
+| ------ | ---------- | -------------------- | -------------- |
+| 1.0.0  | 2026-11-02 | —                    | Versão inicial |
 
 ---
 

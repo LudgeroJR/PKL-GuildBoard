@@ -43,6 +43,14 @@
 
       applyBrandImage_("pkl-poke-legends-logo", branding.pokeLegendsLogoUrl);
 
+      const versionEl = document.getElementById("pkl-app-version");
+      if (versionEl && typeof branding.version === "string" && branding.version.trim() !== "") {
+        const version = branding.version.trim();
+        versionEl.textContent = "v" + version;
+        versionEl.setAttribute("aria-label", "Versão " + version);
+        versionEl.classList.remove("is-hidden");
+      }
+
       const guildNameEl = document.getElementById("pkl-guild-name");
       if (guildNameEl && branding.guildName) {
         guildNameEl.textContent = branding.guildName;

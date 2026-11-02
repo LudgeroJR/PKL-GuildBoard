@@ -17,10 +17,10 @@ function getPublicGuildObjective_() {
     loadGuildObjectiveSkillSnapshot_(),
   );
   return buildPublicGuildObjectiveDto_(guildState, progression, findAllGuildHistory_(),
-    loadGuildObjectiveExpectedWeeklyTarget_());
+    loadGuildObjectiveExpectedWeeklyTarget_(), getCompletedWeeklyContributionTotals_());
 }
 
-function buildPublicGuildObjectiveDto_(guildState, progression, historyRecords, expectedWeeklyTarget) {
+function buildPublicGuildObjectiveDto_(guildState, progression, historyRecords, expectedWeeklyTarget, completedWeeklyTotals) {
   if (guildState === null) {
     return {
       initialized: false,
@@ -66,6 +66,7 @@ function buildPublicGuildObjectiveDto_(guildState, progression, historyRecords, 
       guildState: guildState,
       historyRecords: historyRecords || [],
       expectedWeeklyTarget: expectedWeeklyTarget,
+      completedWeeklyTotals: completedWeeklyTotals || [],
     }),
   };
 }
@@ -238,7 +239,7 @@ function buildAvailableGuildProjection_(days, ratePerDay) {
   };
 }
 
-function buildGuildObjectiveProjections_(objective, guildState, historyRecords, expectedWeeklyTarget, currentGameDayKey) {
+function buildGuildObjectiveProjections_(objective, guildState, historyRecords, expectedWeeklyTarget, currentGameDayKey, completedWeeklyTotals) {
   validateObject_(objective, "objective");
   validateObject_(guildState, "guildState");
   if (!Array.isArray(historyRecords)) throw new Error("Histórico de Guild inválido.");
@@ -257,18 +258,12 @@ function buildGuildObjectiveProjections_(objective, guildState, historyRecords, 
     DEFAULT_TIMEZONE,
   ));
   const weeklyGold = Object.create(null);
+  if (!Array.isArray(completedWeeklyTotals)) completedWeeklyTotals = [];
   let dailyXpTotal = 0;
   let dailyXpCount = 0;
 
   historyRecords.forEach(function (record) {
     if (!record || record.gameDayKey === dayKey) return;
-    if (Number.isSafeInteger(record.goldDelta) && record.goldDelta >= 0) {
-      const weekKey = getGameWeekKey_(createDateInTimezone_(
-        Object.assign(parseDateKeyParts_(record.gameDayKey), {hour: 12, minute: 0, second: 0, millisecond: 0}),
-        DEFAULT_TIMEZONE,
-      ));
-      if (weekKey < currentWeekKey) weeklyGold[weekKey] = (weeklyGold[weekKey] || 0) + record.goldDelta;
-    }
     // Zero é uma produção diária válida; somente null/regressão fica fora da média.
     if (Number.isSafeInteger(record.xpDelta) && record.xpDelta >= 0) {
       dailyXpTotal += record.xpDelta;
@@ -276,6 +271,11 @@ function buildGuildObjectiveProjections_(objective, guildState, historyRecords, 
     }
   });
 
+  completedWeeklyTotals.forEach(function (entry) {
+    const weekKey = validateGameWeekKey_(entry.weekKey, "completedWeeklyTotal.weekKey");
+    const total = validateNonNegativeInteger_(entry.totalContributed, "completedWeeklyTotal.totalContributed");
+    if (weekKey < currentWeekKey) weeklyGold[weekKey] = total;
+  });
   const completeWeeks = Object.keys(weeklyGold).sort().slice(-4);
   const averageWeeklyGold = completeWeeks.length === 0 ? 0
     : completeWeeks.reduce(function (sum, weekKey) { return sum + weeklyGold[weekKey]; }, 0) / completeWeeks.length;
@@ -386,6 +386,7 @@ function buildAdminGuildObjectiveDto_(guildState, snapshot) {
         guildState: guildState,
         historyRecords: findAllGuildHistory_(),
         expectedWeeklyTarget: loadGuildObjectiveExpectedWeeklyTarget_(),
+        completedWeeklyTotals: getCompletedWeeklyContributionTotals_(),
       });
     }
   }
@@ -437,6 +438,8 @@ function toGuildObjectiveDto_(skill, targetLevel, projectionContext) {
       projectionContext.guildState,
       projectionContext.historyRecords,
       projectionContext.expectedWeeklyTarget,
+      null,
+      projectionContext.completedWeeklyTotals,
     );
   }
 
