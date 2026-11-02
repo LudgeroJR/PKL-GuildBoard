@@ -33,6 +33,7 @@ https://docs.google.com/spreadsheets/d/ESTE_E_O_ID/edit
    - Arquivos `.js` → tipo **Script**
    - Arquivos `.html` → tipo **HTML**
    - O arquivo `appsscript.json` substitui o manifesto padrão (ative a exibição do manifesto em **Configurações do projeto → Mostrar arquivo "appsscript.json"**).
+   - Para quem tem familiaridade com linha de comando, existe uma forma alternativa para este passo no final do Roteiro.
 
 ---
 
@@ -107,17 +108,7 @@ O GuildBoard sincroniza dados do jogo automaticamente via um trigger programado.
 
 ---
 
-## Atualização
-
-Para atualizar para uma nova versão:
-
-1. Substitua os arquivos modificados no projeto do Apps Script.
-2. Crie uma nova implantação (**Implantar → Gerenciar implantações → Nova versão**).
-3. A URL permanece a mesma se você usar a implantação original.
-
----
-
-## Instalação via clasp (alternativa para quem tem familiaridade com terminal)
+## Instalação via clasp (alternativa do Passo 2 para quem tem familiaridade com terminal)
 
 O [clasp](https://github.com/google/clasp) permite enviar os arquivos do projeto diretamente do computador para o Apps Script, sem copiar manualmente.
 
